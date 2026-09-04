@@ -1,28 +1,91 @@
 import 'package:flutter/material.dart';
+import '../../models/bin.dart';
+import '../../services/bin_store.dart';
 
-class BinDetailsScreen extends StatelessWidget {
+class BinDetailsScreen extends StatefulWidget {
   const BinDetailsScreen({super.key});
+
+  @override
+  State<BinDetailsScreen> createState() => _BinDetailsScreenState();
+}
+
+class _BinDetailsScreenState extends State<BinDetailsScreen> {
+  String? _binId;
+
+  @override
+  void initState() {
+    super.initState();
+
+    BinStore.instance.addListener(_onBinUpdated);
+  }
+
+  @override
+  void dispose() {
+    BinStore.instance.removeListener(_onBinUpdated);
+    super.dispose();
+  }
+
+  void _onBinUpdated() {
+    if (mounted) {
+      setState(() {});
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final arguments = ModalRoute.of(context)?.settings.arguments;
 
-    final bin = arguments is Map<String, dynamic>
-        ? arguments
-        : <String, dynamic>{
-            'id': 'GG-101',
-            'location': 'Park Street',
-            'fill': 78,
-            'lastUpdated': '2 min ago',
-          };
+    Bin? initialBin;
 
-    final String binId = bin['id'] ?? 'GG-101';
-    final String location = bin['location'] ?? 'Park Street';
-    final int fill = (bin['fill'] as num?)?.toInt() ?? 78;
-    final String lastUpdated = bin['lastUpdated'] ?? '2 min ago';
+    if (arguments is Bin) {
+      initialBin = arguments;
+    } else if (arguments is Map) {
+      final id = arguments['binId']?.toString();
+
+      if (id != null && id.isNotEmpty) {
+        initialBin = BinStore.instance.bins
+            .cast<Bin?>()
+            .firstWhere(
+              (bin) => bin?.id == id,
+              orElse: () => null,
+            );
+      }
+    }
+
+    _binId ??= initialBin?.id;
+
+    final Bin? bin = _binId != null
+        ? BinStore.instance.bins
+            .cast<Bin?>()
+            .firstWhere(
+              (item) => item?.id == _binId,
+              orElse: () => null,
+            )
+        : initialBin;
+
+    if (bin == null) {
+      return Scaffold(
+        appBar: AppBar(
+          backgroundColor: const Color(0xFF2E7D32),
+          foregroundColor: Colors.white,
+          title: const Text('Bin Details'),
+        ),
+
+        body: const Center(
+          child: Text(
+            'Bin information is unavailable.',
+            style: TextStyle(
+              fontSize: 16,
+              color: Colors.grey,
+            ),
+          ),
+        ),
+      );
+    }
+
+    final int fill = bin.fillLevel.round().clamp(0, 100);
 
     final Color statusColor = _getStatusColor(fill);
-    final String statusText = _getStatusText(fill);
 
     return Scaffold(
       backgroundColor: const Color(0xFFF6F8F6),
@@ -31,6 +94,7 @@ class BinDetailsScreen extends StatelessWidget {
         backgroundColor: const Color(0xFF2E7D32),
         foregroundColor: Colors.white,
         elevation: 0,
+
         title: const Text(
           'Bin Details',
           style: TextStyle(
@@ -41,17 +105,23 @@ class BinDetailsScreen extends StatelessWidget {
 
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
+
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
 
-            // Main status card
+            // ---------------------------------------------------------
+            // MAIN STATUS CARD
+            // ---------------------------------------------------------
+
             Container(
               width: double.infinity,
               padding: const EdgeInsets.all(22),
+
               decoration: BoxDecoration(
                 color: Colors.white,
                 borderRadius: BorderRadius.circular(20),
+
                 boxShadow: [
                   BoxShadow(
                     color: Colors.black.withValues(alpha: 0.05),
@@ -60,17 +130,19 @@ class BinDetailsScreen extends StatelessWidget {
                   ),
                 ],
               ),
+
               child: Column(
                 children: [
 
-                  // Bin icon
                   Container(
                     width: 90,
                     height: 90,
+
                     decoration: BoxDecoration(
                       color: statusColor.withValues(alpha: 0.1),
                       shape: BoxShape.circle,
                     ),
+
                     child: Icon(
                       Icons.delete_outline,
                       size: 52,
@@ -81,7 +153,7 @@ class BinDetailsScreen extends StatelessWidget {
                   const SizedBox(height: 18),
 
                   Text(
-                    binId,
+                    bin.id,
                     style: const TextStyle(
                       fontSize: 24,
                       fontWeight: FontWeight.bold,
@@ -91,19 +163,30 @@ class BinDetailsScreen extends StatelessWidget {
                   const SizedBox(height: 6),
 
                   Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
+                    mainAxisAlignment:
+                        MainAxisAlignment.center,
+
                     children: [
                       const Icon(
                         Icons.location_on_outlined,
                         size: 18,
                         color: Colors.grey,
                       ),
+
                       const SizedBox(width: 4),
-                      Text(
-                        location,
-                        style: const TextStyle(
-                          color: Colors.grey,
-                          fontSize: 14,
+
+                      Flexible(
+                        child: Text(
+                          bin.location.isEmpty
+                              ? 'Location unavailable'
+                              : bin.location,
+
+                          textAlign: TextAlign.center,
+
+                          style: const TextStyle(
+                            color: Colors.grey,
+                            fontSize: 14,
+                          ),
                         ),
                       ),
                     ],
@@ -111,7 +194,6 @@ class BinDetailsScreen extends StatelessWidget {
 
                   const SizedBox(height: 25),
 
-                  // Fill percentage
                   Text(
                     '$fill%',
                     style: TextStyle(
@@ -131,13 +213,17 @@ class BinDetailsScreen extends StatelessWidget {
 
                   const SizedBox(height: 18),
 
-                  // Progress bar
                   ClipRRect(
-                    borderRadius: BorderRadius.circular(10),
+                    borderRadius:
+                        BorderRadius.circular(10),
+
                     child: LinearProgressIndicator(
                       value: fill / 100,
                       minHeight: 12,
-                      backgroundColor: Colors.grey.shade200,
+
+                      backgroundColor:
+                          Colors.grey.shade200,
+
                       valueColor:
                           AlwaysStoppedAnimation<Color>(
                         statusColor,
@@ -147,18 +233,22 @@ class BinDetailsScreen extends StatelessWidget {
 
                   const SizedBox(height: 14),
 
-                  // Status badge
                   Container(
                     padding: const EdgeInsets.symmetric(
                       horizontal: 16,
                       vertical: 8,
                     ),
+
                     decoration: BoxDecoration(
-                      color: statusColor.withValues(alpha: 0.1),
-                      borderRadius: BorderRadius.circular(30),
+                      color:
+                          statusColor.withValues(alpha: 0.1),
+
+                      borderRadius:
+                          BorderRadius.circular(30),
                     ),
+
                     child: Text(
-                      statusText,
+                      bin.status,
                       style: TextStyle(
                         color: statusColor,
                         fontWeight: FontWeight.bold,
@@ -171,6 +261,81 @@ class BinDetailsScreen extends StatelessWidget {
 
             const SizedBox(height: 20),
 
+            // ---------------------------------------------------------
+            // LIVE STATUS
+            // ---------------------------------------------------------
+
+            const Text(
+              'Live Status',
+              style: TextStyle(
+                fontSize: 19,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+
+            const SizedBox(height: 12),
+
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(18),
+
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(18),
+              ),
+
+              child: Column(
+                children: [
+
+                  // IMPORTANT:
+                  // online semantics should be confirmed by backend.
+                  _infoRow(
+                    icon: Icons.wifi,
+                    title: 'Connection',
+                    value: bin.online
+                        ? 'Online'
+                        : 'Status unavailable',
+                    valueColor: bin.online
+                        ? const Color(0xFF2E7D32)
+                        : Colors.orange,
+                  ),
+
+                  const Divider(height: 24),
+
+                  _infoRow(
+                    icon: Icons.sensors_outlined,
+                    title: 'Sensor Distance',
+                    value:
+                        '${bin.distance.toStringAsFixed(0)} cm',
+                  ),
+
+                  const Divider(height: 24),
+
+                  _infoRow(
+                    icon: Icons.timer_outlined,
+                    title: 'Device Uptime',
+                    value:
+                        _formatUptime(bin.uptime),
+                  ),
+
+                  const Divider(height: 24),
+
+                  _infoRow(
+                    icon: Icons.access_time,
+                    title: 'Last Updated',
+                    value:
+                        _formatLastUpdated(bin.lastUpdated),
+                  ),
+                ],
+              ),
+            ),
+
+            const SizedBox(height: 20),
+
+            // ---------------------------------------------------------
+            // BIN INFORMATION
+            // ---------------------------------------------------------
+
             const Text(
               'Bin Information',
               style: TextStyle(
@@ -181,21 +346,22 @@ class BinDetailsScreen extends StatelessWidget {
 
             const SizedBox(height: 12),
 
-            // Information card
             Container(
               width: double.infinity,
               padding: const EdgeInsets.all(18),
+
               decoration: BoxDecoration(
                 color: Colors.white,
                 borderRadius: BorderRadius.circular(18),
               ),
+
               child: Column(
                 children: [
 
                   _infoRow(
                     icon: Icons.badge_outlined,
                     title: 'Bin ID',
-                    value: binId,
+                    value: bin.id,
                   ),
 
                   const Divider(height: 24),
@@ -203,24 +369,27 @@ class BinDetailsScreen extends StatelessWidget {
                   _infoRow(
                     icon: Icons.location_on_outlined,
                     title: 'Location',
-                    value: location,
+                    value: bin.location.isEmpty
+                        ? 'Location unavailable'
+                        : bin.location,
                   ),
 
                   const Divider(height: 24),
 
                   _infoRow(
-                    icon: Icons.access_time,
-                    title: 'Last Updated',
-                    value: lastUpdated,
+                    icon: Icons.delete_outline,
+                    title: 'Fill Level',
+                    value: '$fill%',
+                    valueColor: statusColor,
                   ),
 
                   const Divider(height: 24),
 
                   _infoRow(
-                    icon: Icons.sensors_outlined,
-                    title: 'Sensor Status',
-                    value: 'Active',
-                    valueColor: const Color(0xFF2E7D32),
+                    icon: Icons.info_outline,
+                    title: 'Status',
+                    value: bin.status,
+                    valueColor: statusColor,
                   ),
                 ],
               ),
@@ -228,21 +397,32 @@ class BinDetailsScreen extends StatelessWidget {
 
             const SizedBox(height: 25),
 
-            // Navigate button
+            // ---------------------------------------------------------
+            // NAVIGATION
+            // ---------------------------------------------------------
+
             SizedBox(
               width: double.infinity,
               height: 54,
+
               child: ElevatedButton.icon(
-                onPressed: () {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text(
-                        'Navigation will be connected to Maps.',
-                      ),
-                    ),
-                  );
-                },
-                icon: const Icon(Icons.navigation_outlined),
+                onPressed: _hasCoordinates(bin)
+                    ? () {
+                        ScaffoldMessenger.of(context)
+                            .showSnackBar(
+                          const SnackBar(
+                            content: Text(
+                              'Map navigation will be connected when bin coordinates are available.',
+                            ),
+                          ),
+                        );
+                      }
+                    : null,
+
+                icon: const Icon(
+                  Icons.navigation_outlined,
+                ),
+
                 label: const Text(
                   'Navigate to Bin',
                   style: TextStyle(
@@ -250,11 +430,22 @@ class BinDetailsScreen extends StatelessWidget {
                     fontWeight: FontWeight.bold,
                   ),
                 ),
+
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF2E7D32),
+                  backgroundColor:
+                      const Color(0xFF2E7D32),
+
                   foregroundColor: Colors.white,
+
+                  disabledBackgroundColor:
+                      Colors.grey.shade300,
+
+                  disabledForegroundColor:
+                      Colors.grey.shade600,
+
                   shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(14),
+                    borderRadius:
+                        BorderRadius.circular(14),
                   ),
                 ),
               ),
@@ -262,24 +453,31 @@ class BinDetailsScreen extends StatelessWidget {
 
             const SizedBox(height: 12),
 
-            // Report button
+            // ---------------------------------------------------------
+            // REPORT
+            // ---------------------------------------------------------
+
             SizedBox(
               width: double.infinity,
               height: 54,
+
               child: OutlinedButton.icon(
                 onPressed: () {
                   Navigator.pushNamed(
                     context,
                     '/report-issue',
+
                     arguments: {
-                      'binId': binId,
-                      'location': location,
+                      'binId': bin.id,
+                      'location': bin.location,
                     },
                   );
                 },
+
                 icon: const Icon(
                   Icons.report_problem_outlined,
                 ),
+
                 label: const Text(
                   'Report an Issue',
                   style: TextStyle(
@@ -287,13 +485,17 @@ class BinDetailsScreen extends StatelessWidget {
                     fontWeight: FontWeight.bold,
                   ),
                 ),
+
                 style: OutlinedButton.styleFrom(
                   foregroundColor: Colors.red,
+
                   side: const BorderSide(
                     color: Colors.red,
                   ),
+
                   shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(14),
+                    borderRadius:
+                        BorderRadius.circular(14),
                   ),
                 ),
               ),
@@ -301,25 +503,33 @@ class BinDetailsScreen extends StatelessWidget {
 
             const SizedBox(height: 25),
 
-            // Information note
+            // ---------------------------------------------------------
+            // INFORMATION NOTE
+            // ---------------------------------------------------------
+
             Container(
               padding: const EdgeInsets.all(15),
+
               decoration: BoxDecoration(
                 color: const Color(0xFFE8F5E9),
                 borderRadius: BorderRadius.circular(14),
               ),
+
               child: const Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
+                crossAxisAlignment:
+                    CrossAxisAlignment.start,
+
                 children: [
                   Icon(
-                    Icons.info_outline,
+                    Icons.cloud_done_outlined,
                     color: Color(0xFF2E7D32),
                   ),
+
                   SizedBox(width: 10),
+
                   Expanded(
                     child: Text(
-                      'Bin information is updated automatically '
-                      'from the smart waste monitoring system.',
+                      'This bin data is received from the smart waste monitoring system.',
                       style: TextStyle(
                         color: Color(0xFF285D2B),
                         fontSize: 13,
@@ -329,11 +539,17 @@ class BinDetailsScreen extends StatelessWidget {
                 ],
               ),
             ),
+
+            const SizedBox(height: 20),
           ],
         ),
       ),
     );
   }
+
+  // -----------------------------------------------------------------
+  // STATUS COLOR
+  // -----------------------------------------------------------------
 
   static Color _getStatusColor(int fill) {
     if (fill >= 81) {
@@ -347,17 +563,66 @@ class BinDetailsScreen extends StatelessWidget {
     return const Color(0xFF2E7D32);
   }
 
-  static String _getStatusText(int fill) {
-    if (fill >= 81) {
-      return 'Almost Full — Collection Recommended';
+  // -----------------------------------------------------------------
+  // LAST UPDATED
+  // -----------------------------------------------------------------
+
+  static String _formatLastUpdated(DateTime dateTime) {
+    final difference = DateTime.now().toUtc().difference(
+          dateTime.toUtc(),
+        );
+
+    if (difference.isNegative) {
+      return 'Just now';
     }
 
-    if (fill >= 51) {
-      return 'Moderately Filled';
+    if (difference.inSeconds < 60) {
+      return '${difference.inSeconds}s ago';
     }
 
-    return 'Normal — Plenty of Space';
+    if (difference.inMinutes < 60) {
+      return '${difference.inMinutes} min ago';
+    }
+
+    if (difference.inHours < 24) {
+      return '${difference.inHours} hr ago';
+    }
+
+    return '${difference.inDays} days ago';
   }
+
+  // -----------------------------------------------------------------
+  // UPTIME
+  // -----------------------------------------------------------------
+
+  static String _formatUptime(int seconds) {
+    final days = seconds ~/ 86400;
+    final hours = (seconds % 86400) ~/ 3600;
+    final minutes = (seconds % 3600) ~/ 60;
+
+    if (days > 0) {
+      return '${days}d ${hours}h ${minutes}m';
+    }
+
+    if (hours > 0) {
+      return '${hours}h ${minutes}m';
+    }
+
+    return '${minutes}m';
+  }
+
+  // -----------------------------------------------------------------
+  // COORDINATES
+  // -----------------------------------------------------------------
+
+  static bool _hasCoordinates(Bin bin) {
+    return bin.latitude != 0.0 &&
+        bin.longitude != 0.0;
+  }
+
+  // -----------------------------------------------------------------
+  // INFORMATION ROW
+  // -----------------------------------------------------------------
 
   static Widget _infoRow({
     required IconData icon,
@@ -370,10 +635,12 @@ class BinDetailsScreen extends StatelessWidget {
         Container(
           width: 42,
           height: 42,
+
           decoration: BoxDecoration(
             color: const Color(0xFFE8F5E9),
             borderRadius: BorderRadius.circular(12),
           ),
+
           child: Icon(
             icon,
             color: const Color(0xFF2E7D32),
@@ -385,7 +652,9 @@ class BinDetailsScreen extends StatelessWidget {
 
         Expanded(
           child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+            crossAxisAlignment:
+                CrossAxisAlignment.start,
+
             children: [
               Text(
                 title,
@@ -394,13 +663,16 @@ class BinDetailsScreen extends StatelessWidget {
                   fontSize: 12,
                 ),
               ),
+
               const SizedBox(height: 3),
+
               Text(
                 value,
                 style: TextStyle(
                   fontWeight: FontWeight.w600,
                   fontSize: 14,
-                  color: valueColor ?? Colors.black87,
+                  color:
+                      valueColor ?? Colors.black87,
                 ),
               ),
             ],

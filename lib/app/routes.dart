@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-
 import '../screens/splash/splash_screen.dart';
 import '../screens/auth/login_screen.dart';
 import '../screens/auth/signup_screen.dart';
@@ -11,6 +10,8 @@ import '../screens/reports/my_reports_screen.dart';
 import '../screens/notifications/notifications_screen.dart';
 import '../screens/awareness/awareness_screen.dart';
 import '../screens/profile/profile_screen.dart';
+
+
 
 class AppRoutes {
   static const String splash = '/';
@@ -24,6 +25,7 @@ class AppRoutes {
   static const String notifications = '/notifications';
   static const String awareness = '/awareness';
   static const String profile = '/profile';
+
 
   static Route<dynamic> generateRoute(RouteSettings settings) {
     switch (settings.name) {
@@ -48,9 +50,10 @@ class AppRoutes {
         );
 
       case binDetails:
-        return MaterialPageRoute(
-          builder: (_) => const BinDetailsScreen(),
-        );
+  return MaterialPageRoute(
+    settings: settings,
+    builder: (_) => const BinDetailsScreen(),
+  );
 
       case map:
         return MaterialPageRoute(

@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import '../../models/bin.dart';
+import '../../services/bin_store.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -10,32 +12,23 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   int _selectedIndex = 0;
 
-  final List<Map<String, dynamic>> bins = [
-    {
-      'id': 'GG-101',
-      'location': 'Park Street',
-      'fill': 78,
-      'lastUpdated': '2 min ago',
-    },
-    {
-      'id': 'GG-102',
-      'location': 'Main Road',
-      'fill': 45,
-      'lastUpdated': '5 min ago',
-    },
-    {
-      'id': 'GG-103',
-      'location': 'Market Area',
-      'fill': 92,
-      'lastUpdated': '1 min ago',
-    },
-    {
-      'id': 'GG-104',
-      'location': 'School Zone',
-      'fill': 30,
-      'lastUpdated': '8 min ago',
-    },
-  ];
+  @override
+  void initState() {
+    super.initState();
+    BinStore.instance.addListener(_onBinsUpdated);
+  }
+
+  @override
+  void dispose() {
+    BinStore.instance.removeListener(_onBinsUpdated);
+    super.dispose();
+  }
+
+  void _onBinsUpdated() {
+    if (mounted) {
+      setState(() {});
+    }
+  }
 
   Color getStatusColor(int fill) {
     if (fill >= 81) {
@@ -44,16 +37,6 @@ class _HomeScreenState extends State<HomeScreen> {
       return Colors.orange;
     } else {
       return const Color(0xFF2E7D32);
-    }
-  }
-
-  String getStatusText(int fill) {
-    if (fill >= 81) {
-      return 'Almost Full';
-    } else if (fill >= 51) {
-      return 'Moderate';
-    } else {
-      return 'Normal';
     }
   }
 
@@ -81,7 +64,7 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  void _openBinDetails(Map<String, dynamic> bin) {
+  void _openBinDetails(Bin bin) {
     Navigator.pushNamed(
       context,
       '/bin-details',
@@ -91,6 +74,8 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final bins = BinStore.instance.bins;
+
     return Scaffold(
       backgroundColor: const Color(0xFFF6F8F6),
 
@@ -98,6 +83,7 @@ class _HomeScreenState extends State<HomeScreen> {
         backgroundColor: const Color(0xFF2E7D32),
         elevation: 0,
         automaticallyImplyLeading: false,
+
         title: Row(
           children: [
             Container(
@@ -159,7 +145,10 @@ class _HomeScreenState extends State<HomeScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
 
-              // Greeting
+              // -------------------------------------------------------
+              // GREETING
+              // -------------------------------------------------------
+
               const Text(
                 'Hello, Citizen 👋',
                 style: TextStyle(
@@ -181,7 +170,10 @@ class _HomeScreenState extends State<HomeScreen> {
 
               const SizedBox(height: 20),
 
-              // Search
+              // -------------------------------------------------------
+              // SEARCH
+              // -------------------------------------------------------
+
               Container(
                 decoration: BoxDecoration(
                   color: Colors.white,
@@ -196,7 +188,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
                 child: TextField(
                   decoration: InputDecoration(
-                    hintText: 'Search nearby bins...',
+                    hintText: 'Search smart bins...',
                     hintStyle: const TextStyle(
                       color: Colors.grey,
                     ),
@@ -216,7 +208,10 @@ class _HomeScreenState extends State<HomeScreen> {
 
               const SizedBox(height: 25),
 
-              // Section title
+              // -------------------------------------------------------
+              // QUICK ACTIONS
+              // -------------------------------------------------------
+
               const Text(
                 'Quick Actions',
                 style: TextStyle(
@@ -227,7 +222,6 @@ class _HomeScreenState extends State<HomeScreen> {
 
               const SizedBox(height: 12),
 
-              // Quick actions
               Row(
                 children: [
                   Expanded(
@@ -240,14 +234,19 @@ class _HomeScreenState extends State<HomeScreen> {
                       },
                     ),
                   ),
+
                   const SizedBox(width: 12),
+
                   Expanded(
                     child: _quickAction(
                       icon: Icons.report_problem_outlined,
                       title: 'Report Issues',
                       color: Colors.red,
                       onTap: () {
-                        Navigator.pushNamed(context, '/report-issue');
+                        Navigator.pushNamed(
+                          context,
+                          '/report-issue',
+                        );
                       },
                     ),
                   ),
@@ -271,7 +270,9 @@ class _HomeScreenState extends State<HomeScreen> {
                       },
                     ),
                   ),
+
                   const SizedBox(width: 12),
+
                   Expanded(
                     child: _quickAction(
                       icon: Icons.notifications_outlined,
@@ -290,51 +291,64 @@ class _HomeScreenState extends State<HomeScreen> {
 
               const SizedBox(height: 28),
 
-              // Nearby bins
+              // -------------------------------------------------------
+              // SMART BINS
+              // -------------------------------------------------------
+
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   const Text(
-                    'Nearby Smart Bins',
+                    'Smart Bins',
                     style: TextStyle(
                       fontSize: 19,
                       fontWeight: FontWeight.bold,
                     ),
                   ),
 
-                  TextButton(
-                    onPressed: () {
-                      Navigator.pushNamed(
-                        context,
-                        '/map',
-                      );
-                    },
-                    child: const Text(
-                      'See All',
-                      style: TextStyle(
-                        color: Color(0xFF2E7D32),
-                        fontWeight: FontWeight.bold,
+                  if (bins.isNotEmpty)
+                    TextButton(
+                      onPressed: () {
+                        Navigator.pushNamed(
+                          context,
+                          '/map',
+                        );
+                      },
+                      child: const Text(
+                        'See All',
+                        style: TextStyle(
+                          color: Color(0xFF2E7D32),
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
                     ),
-                  ),
                 ],
               ),
 
               const SizedBox(height: 8),
 
-              // Bin cards
-              ...bins.map(
-                (bin) => _buildBinCard(bin),
-              ),
+              // -------------------------------------------------------
+              // LIVE BIN DATA
+              // -------------------------------------------------------
+
+              if (bins.isEmpty)
+                _buildEmptyBinsState()
+              else
+                ...bins.map(
+                  (bin) => _buildBinCard(bin),
+                ),
             ],
           ),
         ),
       ),
 
+      // -------------------------------------------------------------
+      // BOTTOM NAVIGATION
+      // -------------------------------------------------------------
+
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _selectedIndex,
         onTap: _onBottomNavigationTap,
-
         type: BottomNavigationBarType.fixed,
 
         selectedItemColor: const Color(0xFF2E7D32),
@@ -382,6 +396,56 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  // -----------------------------------------------------------------
+  // EMPTY STATE
+  // -----------------------------------------------------------------
+
+  Widget _buildEmptyBinsState() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(
+        vertical: 35,
+        horizontal: 20,
+      ),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(18),
+      ),
+      child: const Column(
+        children: [
+          CircularProgressIndicator(
+            color: Color(0xFF2E7D32),
+          ),
+
+          SizedBox(height: 14),
+
+          Text(
+            'Waiting for smart bin data...',
+            style: TextStyle(
+              fontWeight: FontWeight.w600,
+              color: Colors.black87,
+            ),
+          ),
+
+          SizedBox(height: 5),
+
+          Text(
+            'Live bin information will appear here.',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: Colors.grey,
+              fontSize: 13,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // -----------------------------------------------------------------
+  // QUICK ACTION
+  // -----------------------------------------------------------------
+
   Widget _quickAction({
     required IconData icon,
     required String title,
@@ -391,14 +455,17 @@ class _HomeScreenState extends State<HomeScreen> {
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(16),
+
       child: Container(
         height: 100,
+
         decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(16),
           border: Border.all(
             color: Colors.grey.shade200,
           ),
+
           boxShadow: [
             BoxShadow(
               color: Colors.black.withValues(alpha: 0.04),
@@ -407,16 +474,19 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ],
         ),
+
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Container(
               width: 44,
               height: 44,
+
               decoration: BoxDecoration(
                 color: color.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(12),
               ),
+
               child: Icon(
                 icon,
                 color: color,
@@ -439,8 +509,13 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _buildBinCard(Map<String, dynamic> bin) {
-    final int fill = bin['fill'];
+  // -----------------------------------------------------------------
+  // BIN CARD
+  // -----------------------------------------------------------------
+
+  Widget _buildBinCard(Bin bin) {
+    final int fill = bin.fillLevel.round().clamp(0, 100);
+
     final Color statusColor = getStatusColor(fill);
 
     return InkWell(
@@ -470,10 +545,11 @@ class _HomeScreenState extends State<HomeScreen> {
             Row(
               children: [
 
-                // Bin icon
+                // BIN ICON
                 Container(
                   width: 52,
                   height: 52,
+
                   decoration: BoxDecoration(
                     color: statusColor.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(14),
@@ -488,7 +564,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
                 const SizedBox(width: 14),
 
-                // Bin information
+                // BIN INFORMATION
                 Expanded(
                   child: Column(
                     crossAxisAlignment:
@@ -496,7 +572,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
                     children: [
                       Text(
-                        bin['id'],
+                        bin.id,
                         style: const TextStyle(
                           fontWeight: FontWeight.bold,
                           fontSize: 16,
@@ -517,7 +593,10 @@ class _HomeScreenState extends State<HomeScreen> {
 
                           Expanded(
                             child: Text(
-                              bin['location'],
+                              bin.location.isEmpty
+                                  ? 'Location unavailable'
+                                  : bin.location,
+
                               style: const TextStyle(
                                 color: Colors.grey,
                                 fontSize: 13,
@@ -530,7 +609,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                 ),
 
-                // Percentage
+                // PERCENTAGE
                 Text(
                   '$fill%',
                   style: TextStyle(
@@ -544,14 +623,17 @@ class _HomeScreenState extends State<HomeScreen> {
 
             const SizedBox(height: 14),
 
-            // Progress bar
+            // PROGRESS BAR
             ClipRRect(
               borderRadius: BorderRadius.circular(10),
 
               child: LinearProgressIndicator(
-                value: fill / 100,
+                value: (fill / 100).clamp(0.0, 1.0),
                 minHeight: 8,
-                backgroundColor: Colors.grey.shade200,
+
+                backgroundColor:
+                    Colors.grey.shade200,
+
                 valueColor:
                     AlwaysStoppedAnimation<Color>(
                   statusColor,
@@ -566,6 +648,8 @@ class _HomeScreenState extends State<HomeScreen> {
                   MainAxisAlignment.spaceBetween,
 
               children: [
+
+                // STATUS
                 Container(
                   padding: const EdgeInsets.symmetric(
                     horizontal: 10,
@@ -573,12 +657,15 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
 
                   decoration: BoxDecoration(
-                    color: statusColor.withValues(alpha: 0.1),
-                    borderRadius: BorderRadius.circular(20),
+                    color:
+                        statusColor.withValues(alpha: 0.1),
+
+                    borderRadius:
+                        BorderRadius.circular(20),
                   ),
 
                   child: Text(
-                    getStatusText(fill),
+                    bin.status,
                     style: TextStyle(
                       color: statusColor,
                       fontWeight: FontWeight.w600,
@@ -587,6 +674,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                 ),
 
+                // UPDATED
                 Row(
                   children: [
                     const Icon(
@@ -598,7 +686,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     const SizedBox(width: 4),
 
                     Text(
-                      'Updated ${bin['lastUpdated']}',
+                      'Updated ${_formatLastUpdated(bin.lastUpdated)}',
                       style: const TextStyle(
                         color: Colors.grey,
                         fontSize: 11,
@@ -612,5 +700,33 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
       ),
     );
+  }
+
+  // -----------------------------------------------------------------
+  // LAST UPDATED
+  // -----------------------------------------------------------------
+
+  String _formatLastUpdated(DateTime dateTime) {
+    final difference = DateTime.now().toUtc().difference(
+          dateTime.toUtc(),
+        );
+
+    if (difference.isNegative) {
+      return 'Just now';
+    }
+
+    if (difference.inSeconds < 60) {
+      return '${difference.inSeconds}s ago';
+    }
+
+    if (difference.inMinutes < 60) {
+      return '${difference.inMinutes} min ago';
+    }
+
+    if (difference.inHours < 24) {
+      return '${difference.inHours} hr ago';
+    }
+
+    return '${difference.inDays} days ago';
   }
 }

@@ -6,6 +6,9 @@ class Bin {
   final double latitude;
   final double longitude;
   final DateTime lastUpdated;
+  final int uptime;
+  final bool online;
+  final double distance;
 
   const Bin({
     required this.id,
@@ -15,20 +18,29 @@ class Bin {
     required this.latitude,
     required this.longitude,
     required this.lastUpdated,
+    required this.uptime,
+    required this.online,
+    required this.distance,
   });
 
   factory Bin.fromJson(Map<String, dynamic> json) {
     return Bin(
-      id: json['binId'] ?? '',
-      location: json['location'] ?? '',
-      fillLevel: (json['fillLevel'] ?? 0).toDouble(),
-      status: json['status'] ?? 'Unknown',
-      latitude: (json['latitude'] ?? 0).toDouble(),
-      longitude: (json['longitude'] ?? 0).toDouble(),
-      lastUpdated: DateTime.tryParse(
-            json['lastUpdated'] ?? '',
-          ) ??
-          DateTime.now(),
+      distance: (json['distance'] as num?)?.toDouble() ?? 0.0,
+      id: json['deviceId']?.toString() ?? '',
+      location: json['location']?.toString() ?? 'Location unavailable',
+      fillLevel: (json['fillPercentage'] as num?)?.toDouble() ?? 0.0,
+      status: json['status']?.toString() ?? 'Unknown',
+
+      // Backend has NOT provided coordinates yet.
+      latitude: (json['latitude'] as num?)?.toDouble() ?? 0.0,
+      longitude: (json['longitude'] as num?)?.toDouble() ?? 0.0,
+
+      lastUpdated:
+          DateTime.tryParse(json['lastUpdated']?.toString() ?? '') ??
+              DateTime.now(),
+
+      uptime: (json['uptime'] as num?)?.toInt() ?? 0,
+      online: json['online'] == true,
     );
   }
 }

@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import '../../models/bin.dart';
+import '../../services/bin_store.dart';
 
 class MapScreen extends StatefulWidget {
   const MapScreen({super.key});
@@ -8,36 +10,40 @@ class MapScreen extends StatefulWidget {
 }
 
 class _MapScreenState extends State<MapScreen> {
-  final List<Map<String, dynamic>> bins = [
-    {
-      'id': 'GG-101',
-      'location': 'Park Street',
-      'fill': 78,
-      'distance': '400 m',
-    },
-    {
-      'id': 'GG-102',
-      'location': 'Main Road',
-      'fill': 45,
-      'distance': '700 m',
-    },
-    {
-      'id': 'GG-103',
-      'location': 'Market Area',
-      'fill': 92,
-      'distance': '650 m',
-    },
-    {
-      'id': 'GG-104',
-      'location': 'School Zone',
-      'fill': 30,
-      'distance': '900 m',
-    },
-  ];
+  Bin? _selectedBin;
 
-  int? selectedBinIndex;
+  @override
+  void initState() {
+    super.initState();
+    BinStore.instance.addListener(_onBinsUpdated);
+  }
 
-  Color _getBinColor(int fill) {
+  @override
+  void dispose() {
+    BinStore.instance.removeListener(_onBinsUpdated);
+    super.dispose();
+  }
+
+  void _onBinsUpdated() {
+    if (!mounted) return;
+
+    final bins = BinStore.instance.bins;
+
+    // Keep selected bin synchronized with the latest live data.
+    if (_selectedBin != null) {
+      try {
+        _selectedBin = bins.firstWhere(
+          (bin) => bin.id == _selectedBin!.id,
+        );
+      } catch (_) {
+        _selectedBin = null;
+      }
+    }
+
+    setState(() {});
+  }
+
+  Color _getStatusColor(int fill) {
     if (fill >= 81) {
       return Colors.red;
     }
@@ -49,197 +55,239 @@ class _MapScreenState extends State<MapScreen> {
     return const Color(0xFF2E7D32);
   }
 
+  String _getStatusText(Bin bin) {
+    final fill = bin.fillLevel.round().clamp(0, 100);
+
+    if (fill >= 81) {
+      return 'High Fill Level';
+    }
+
+    if (fill >= 51) {
+      return 'Moderate Fill Level';
+    }
+
+    return 'Normal Fill Level';
+  }
+
+  void _selectBin(Bin bin) {
+    setState(() {
+      _selectedBin = bin;
+    });
+  }
+
+  void _openDetails(Bin bin) {
+    Navigator.pushNamed(
+      context,
+      '/bin-details',
+      arguments: bin,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    final bins = BinStore.instance.bins;
+
+    final criticalBins = bins.where(
+      (bin) => bin.fillLevel >= 81,
+    ).length;
+
     return Scaffold(
       backgroundColor: const Color(0xFFF6F8F6),
 
       appBar: AppBar(
+        backgroundColor: const Color(0xFF2E7D32),
+        foregroundColor: Colors.white,
+        elevation: 0,
+
         title: const Text(
-          'Nearby Smart Bins',
+          'Smart Bin Map',
           style: TextStyle(
             fontWeight: FontWeight.bold,
           ),
         ),
+
         actions: [
           IconButton(
             onPressed: () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text(
-                    'Your location will be detected here.',
-                  ),
-                ),
-              );
+              setState(() {
+                _selectedBin = null;
+              });
             },
-            icon: const Icon(
-              Icons.my_location,
-            ),
+            icon: const Icon(Icons.refresh),
           ),
         ],
       ),
 
-      body: Stack(
-        children: [
-          // Temporary map area
-          Positioned.fill(
-            child: Container(
-              color: const Color(0xFFE7ECE7),
-              child: CustomPaint(
-                painter: _MapBackgroundPainter(),
-                child: Stack(
-                  children: [
-                    _mapMarker(
-                      index: 0,
-                      left: 75,
-                      top: 130,
-                    ),
-                    _mapMarker(
-                      index: 1,
-                      left: 250,
-                      top: 190,
-                    ),
-                    _mapMarker(
-                      index: 2,
-                      left: 155,
-                      top: 310,
-                    ),
-                    _mapMarker(
-                      index: 3,
-                      left: 310,
-                      top: 100,
-                    ),
+      body: bins.isEmpty
+          ? _buildLoadingState()
+          : Column(
+              children: [
 
-                    // Current location
-                    Positioned(
-                      left: 185,
-                      top: 205,
-                      child: Container(
-                        width: 18,
-                        height: 18,
-                        decoration: BoxDecoration(
-                          color: Colors.blue,
-                          shape: BoxShape.circle,
-                          border: Border.all(
-                            color: Colors.white,
-                            width: 3,
-                          ),
-                          boxShadow: const [
-                            BoxShadow(
-                              color: Colors.blue,
-                              blurRadius: 10,
-                            ),
-                          ],
+                // -----------------------------------------------------
+                // SUMMARY
+                // -----------------------------------------------------
+
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.fromLTRB(
+                    16,
+                    16,
+                    16,
+                    12,
+                  ),
+
+                  color: Colors.white,
+
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: _summaryCard(
+                          icon: Icons.delete_outline,
+                          title: 'Smart Bins',
+                          value: '${bins.length}',
+                          color: const Color(0xFF2E7D32),
                         ),
                       ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
 
-          // Map label
-          Positioned(
-            top: 15,
-            left: 15,
-            right: 15,
-            child: Container(
-              padding: const EdgeInsets.symmetric(
-                horizontal: 14,
-                vertical: 10,
-              ),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(14),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.08),
-                    blurRadius: 10,
-                  ),
-                ],
-              ),
-              child: const Row(
-                children: [
-                  Icon(
-                    Icons.location_on,
-                    color: Color(0xFF2E7D32),
-                  ),
-                  SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      'Showing smart bins near your location',
-                      style: TextStyle(
-                        fontWeight: FontWeight.w600,
-                        fontSize: 13,
+                      const SizedBox(width: 10),
+
+                      Expanded(
+                        child: _summaryCard(
+                          icon: Icons.warning_amber_outlined,
+                          title: 'High Fill',
+                          value: '$criticalBins',
+                          color: Colors.red,
+                        ),
                       ),
-                    ),
+                    ],
                   ),
-                ],
-              ),
-            ),
-          ),
+                ),
 
-          // Selected bin
-          if (selectedBinIndex != null)
-            Positioned(
-              left: 15,
-              right: 15,
-              bottom: 15,
-              child: _selectedBinCard(
-                bins[selectedBinIndex!],
-              ),
+                // -----------------------------------------------------
+                // INFORMATION
+                // -----------------------------------------------------
+
+                Container(
+                  width: double.infinity,
+                  margin: const EdgeInsets.fromLTRB(
+                    16,
+                    14,
+                    16,
+                    8,
+                  ),
+
+                  padding: const EdgeInsets.all(14),
+
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFE8F5E9),
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+
+                  child: const Row(
+                    crossAxisAlignment:
+                        CrossAxisAlignment.start,
+
+                    children: [
+                      Icon(
+                        Icons.info_outline,
+                        color: Color(0xFF2E7D32),
+                      ),
+
+                      SizedBox(width: 10),
+
+                      Expanded(
+                        child: Text(
+                          'Live smart bin locations are not available yet. '
+                          'The list below shows bins received from the '
+                          'monitoring system.',
+                          style: TextStyle(
+                            color: Color(0xFF285D2B),
+                            fontSize: 13,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+
+                // -----------------------------------------------------
+                // BIN LIST
+                // -----------------------------------------------------
+
+                Expanded(
+                  child: ListView.builder(
+                    padding: const EdgeInsets.fromLTRB(
+                      16,
+                      8,
+                      16,
+                      24,
+                    ),
+
+                    itemCount: bins.length,
+
+                    itemBuilder: (context, index) {
+                      final bin = bins[index];
+
+                      return _buildBinCard(bin);
+                    },
+                  ),
+                ),
+
+                // -----------------------------------------------------
+                // SELECTED BIN
+                // -----------------------------------------------------
+
+                if (_selectedBin != null)
+                  _buildSelectedBinCard(_selectedBin!),
+              ],
             ),
-        ],
-      ),
     );
   }
 
-  Widget _mapMarker({
-    required int index,
-    required double left,
-    required double top,
-  }) {
-    final bin = bins[index];
-    final Color color = _getBinColor(bin['fill']);
+  // -------------------------------------------------------------------
+  // LOADING
+  // -------------------------------------------------------------------
 
-    return Positioned(
-      left: left,
-      top: top,
-      child: GestureDetector(
-        onTap: () {
-          setState(() {
-            selectedBinIndex = index;
-          });
-        },
+  Widget _buildLoadingState() {
+    return const Center(
+      child: Padding(
+        padding: EdgeInsets.all(30),
+
         child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+
           children: [
-            Container(
-              width: 44,
-              height: 44,
-              decoration: BoxDecoration(
-                color: color,
-                shape: BoxShape.circle,
-                border: Border.all(
-                  color: Colors.white,
-                  width: 3,
-                ),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.18),
-                    blurRadius: 8,
-                  ),
-                ],
-              ),
-              child: const Icon(
-                Icons.delete_outline,
-                color: Colors.white,
-                size: 25,
+            Icon(
+              Icons.location_searching,
+              size: 60,
+              color: Color(0xFF2E7D32),
+            ),
+
+            SizedBox(height: 18),
+
+            CircularProgressIndicator(
+              color: Color(0xFF2E7D32),
+            ),
+
+            SizedBox(height: 16),
+
+            Text(
+              'Waiting for smart bin data...',
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                fontSize: 16,
               ),
             ),
-            CustomPaint(
-              size: const Size(12, 8),
-              painter: _MarkerTrianglePainter(color),
+
+            SizedBox(height: 6),
+
+            Text(
+              'Live bins will appear here when data is received.',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: Colors.grey,
+                fontSize: 13,
+              ),
             ),
           ],
         ),
@@ -247,190 +295,424 @@ class _MapScreenState extends State<MapScreen> {
     );
   }
 
-  Widget _selectedBinCard(
-    Map<String, dynamic> bin,
-  ) {
-    final Color color = _getBinColor(bin['fill']);
+  // -------------------------------------------------------------------
+  // SUMMARY CARD
+  // -------------------------------------------------------------------
 
+  Widget _summaryCard({
+    required IconData icon,
+    required String title,
+    required String value,
+    required Color color,
+  }) {
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(14),
+
       decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(20),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.15),
-            blurRadius: 15,
-            offset: const Offset(0, 5),
-          ),
-        ],
+        color: color.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(14),
       ),
+
       child: Row(
         children: [
           Container(
-            width: 50,
-            height: 50,
+            width: 42,
+            height: 42,
+
             decoration: BoxDecoration(
-              color: color.withValues(alpha: 0.1),
-              borderRadius: BorderRadius.circular(14),
+              color: color.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(12),
             ),
+
             child: Icon(
-              Icons.delete_outline,
+              icon,
               color: color,
-              size: 28,
             ),
           ),
 
-          const SizedBox(width: 12),
+          const SizedBox(width: 10),
 
           Expanded(
             child: Column(
               crossAxisAlignment:
                   CrossAxisAlignment.start,
+
               children: [
                 Text(
-                  bin['id'],
-                  style: const TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 16,
-                  ),
-                ),
-                const SizedBox(height: 3),
-                Text(
-                  bin['location'],
+                  title,
                   style: const TextStyle(
                     color: Colors.grey,
                     fontSize: 12,
                   ),
                 ),
-                const SizedBox(height: 3),
+
+                const SizedBox(height: 2),
+
                 Text(
-                  '${bin['distance']} • ${bin['fill']}% full',
+                  value,
                   style: TextStyle(
                     color: color,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
                   ),
                 ),
               ],
-            ),
-          ),
-
-          IconButton(
-            onPressed: () {
-              Navigator.pushNamed(
-                context,
-                '/bin-details',
-                arguments: bin,
-              );
-            },
-            icon: const Icon(
-              Icons.chevron_right,
-              color: Color(0xFF2E7D32),
             ),
           ),
         ],
       ),
     );
   }
-}
 
-class _MapBackgroundPainter extends CustomPainter {
-  @override
-  void paint(
-    Canvas canvas,
-    Size size,
-  ) {
-    final paint = Paint()
-      ..color = Colors.white
-      ..strokeWidth = 2;
+  // -------------------------------------------------------------------
+  // BIN CARD
+  // -------------------------------------------------------------------
 
-    // Horizontal roads
-    for (double y = 70; y < size.height; y += 90) {
-      canvas.drawLine(
-        Offset(0, y),
-        Offset(size.width, y),
-        paint,
-      );
-    }
+  Widget _buildBinCard(Bin bin) {
+    final fill = bin.fillLevel.round().clamp(0, 100);
 
-    // Vertical roads
-    for (double x = 60; x < size.width; x += 100) {
-      canvas.drawLine(
-        Offset(x, 0),
-        Offset(x, size.height),
-        paint,
-      );
-    }
+    final statusColor = _getStatusColor(fill);
 
-    // Main diagonal roads
-    paint.strokeWidth = 5;
+    final isSelected =
+        _selectedBin?.id == bin.id;
 
-    canvas.drawLine(
-      Offset(0, size.height * 0.75),
-      Offset(size.width, size.height * 0.25),
-      paint,
-    );
+    return InkWell(
+      onTap: () => _selectBin(bin),
 
-    canvas.drawLine(
-      Offset(size.width * 0.15, 0),
-      Offset(size.width * 0.85, size.height),
-      paint,
-    );
+      borderRadius: BorderRadius.circular(18),
 
-    // Parks
-    paint
-      ..color = const Color(0xFFDDEEDB)
-      ..style = PaintingStyle.fill;
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 12),
+        padding: const EdgeInsets.all(16),
 
-    canvas.drawCircle(
-      Offset(size.width * 0.75, size.height * 0.65),
-      60,
-      paint,
-    );
+        decoration: BoxDecoration(
+          color: Colors.white,
 
-    canvas.drawCircle(
-      Offset(size.width * 0.2, size.height * 0.35),
-      45,
-      paint,
+          borderRadius: BorderRadius.circular(18),
+
+          border: isSelected
+              ? Border.all(
+                  color: const Color(0xFF2E7D32),
+                  width: 2,
+                )
+              : null,
+
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.04),
+              blurRadius: 8,
+              offset: const Offset(0, 3),
+            ),
+          ],
+        ),
+
+        child: Column(
+          children: [
+
+            Row(
+              children: [
+
+                // BIN ICON
+                Container(
+                  width: 50,
+                  height: 50,
+
+                  decoration: BoxDecoration(
+                    color:
+                        statusColor.withValues(alpha: 0.1),
+
+                    borderRadius:
+                        BorderRadius.circular(14),
+                  ),
+
+                  child: Icon(
+                    Icons.delete_outline,
+                    color: statusColor,
+                    size: 29,
+                  ),
+                ),
+
+                const SizedBox(width: 13),
+
+                // BIN DETAILS
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment:
+                        CrossAxisAlignment.start,
+
+                    children: [
+                      Text(
+                        bin.id,
+                        style: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 16,
+                        ),
+                      ),
+
+                      const SizedBox(height: 4),
+
+                      Text(
+                        _getStatusText(bin),
+                        style: TextStyle(
+                          color: statusColor,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+
+                // FILL
+                Text(
+                  '$fill%',
+                  style: TextStyle(
+                    color: statusColor,
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ],
+            ),
+
+            const SizedBox(height: 13),
+
+            // PROGRESS
+            ClipRRect(
+              borderRadius: BorderRadius.circular(10),
+
+              child: LinearProgressIndicator(
+                value: fill / 100,
+                minHeight: 8,
+
+                backgroundColor:
+                    Colors.grey.shade200,
+
+                valueColor:
+                    AlwaysStoppedAnimation<Color>(
+                  statusColor,
+                ),
+              ),
+            ),
+
+            const SizedBox(height: 10),
+
+            Row(
+              mainAxisAlignment:
+                  MainAxisAlignment.spaceBetween,
+
+              children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 9,
+                    vertical: 5,
+                  ),
+
+                  decoration: BoxDecoration(
+                    color:
+                        statusColor.withValues(alpha: 0.1),
+
+                    borderRadius:
+                        BorderRadius.circular(20),
+                  ),
+
+                  child: Text(
+                    bin.status,
+                    style: TextStyle(
+                      color: statusColor,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+
+                Text(
+                  bin.location.isEmpty
+                      ? 'Location unavailable'
+                      : bin.location,
+
+                  style: const TextStyle(
+                    color: Colors.grey,
+                    fontSize: 11,
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
     );
   }
 
-  @override
-  bool shouldRepaint(
-    covariant CustomPainter oldDelegate,
-  ) {
-    return false;
+  // -------------------------------------------------------------------
+  // SELECTED BIN CARD
+  // -------------------------------------------------------------------
+
+  Widget _buildSelectedBinCard(Bin bin) {
+    final fill = bin.fillLevel.round().clamp(0, 100);
+
+    final statusColor = _getStatusColor(fill);
+
+    return Container(
+      width: double.infinity,
+
+      padding: const EdgeInsets.fromLTRB(
+        18,
+        14,
+        18,
+        18,
+      ),
+
+      decoration: BoxDecoration(
+        color: Colors.white,
+
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.12),
+            blurRadius: 15,
+            offset: const Offset(0, -4),
+          ),
+        ],
+
+        borderRadius: const BorderRadius.vertical(
+          top: Radius.circular(22),
+        ),
+      ),
+
+      child: Column(
+        children: [
+
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment:
+                      CrossAxisAlignment.start,
+
+                  children: [
+                    const Text(
+                      'Selected Smart Bin',
+                      style: TextStyle(
+                        color: Colors.grey,
+                        fontSize: 12,
+                      ),
+                    ),
+
+                    const SizedBox(height: 3),
+
+                    Text(
+                      bin.id,
+                      style: const TextStyle(
+                        fontSize: 19,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+              IconButton(
+                onPressed: () {
+                  setState(() {
+                    _selectedBin = null;
+                  });
+                },
+                icon: const Icon(Icons.close),
+              ),
+            ],
+          ),
+
+          Row(
+            children: [
+
+              Expanded(
+                child: _selectedInfo(
+                  'Fill Level',
+                  '$fill%',
+                  statusColor,
+                ),
+              ),
+
+              Expanded(
+                child: _selectedInfo(
+                  'Status',
+                  bin.status,
+                  statusColor,
+                ),
+              ),
+            ],
+          ),
+
+          const SizedBox(height: 14),
+
+          SizedBox(
+            width: double.infinity,
+            height: 48,
+
+            child: ElevatedButton.icon(
+              onPressed: () => _openDetails(bin),
+
+              icon: const Icon(
+                Icons.visibility_outlined,
+              ),
+
+              label: const Text(
+                'View Bin Details',
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+
+              style: ElevatedButton.styleFrom(
+                backgroundColor:
+                    const Color(0xFF2E7D32),
+
+                foregroundColor: Colors.white,
+
+                shape: RoundedRectangleBorder(
+                  borderRadius:
+                      BorderRadius.circular(13),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
-}
 
-class _MarkerTrianglePainter extends CustomPainter {
-  final Color color;
-
-  _MarkerTrianglePainter(this.color);
-
-  @override
-  void paint(
-    Canvas canvas,
-    Size size,
+  Widget _selectedInfo(
+    String title,
+    String value,
+    Color valueColor,
   ) {
-    final paint = Paint()
-      ..color = color
-      ..style = PaintingStyle.fill;
+    return Column(
+      crossAxisAlignment:
+          CrossAxisAlignment.start,
 
-    final path = Path()
-      ..moveTo(0, 0)
-      ..lineTo(size.width / 2, size.height)
-      ..lineTo(size.width, 0)
-      ..close();
+      children: [
+        Text(
+          title,
+          style: const TextStyle(
+            color: Colors.grey,
+            fontSize: 11,
+          ),
+        ),
 
-    canvas.drawPath(path, paint);
-  }
+        const SizedBox(height: 3),
 
-  @override
-  bool shouldRepaint(
-    covariant CustomPainter oldDelegate,
-  ) {
-    return false;
+        Text(
+          value,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+
+          style: TextStyle(
+            color: valueColor,
+            fontSize: 15,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+      ],
+    );
   }
 }
