@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_map/flutter_map.dart';
+import 'package:latlong2/latlong.dart';
+
 import '../../models/bin.dart';
 import '../../services/bin_store.dart';
 
@@ -12,9 +15,29 @@ class MapScreen extends StatefulWidget {
 class _MapScreenState extends State<MapScreen> {
   Bin? _selectedBin;
 
+  // Marwadi University demo center.
+  static const LatLng _campusCenter = LatLng(
+    22.368298,
+    70.798212,
+  );
+
+  // DEMO locations only.
+  // Replace these with actual bin coordinates later.
+  final Map<String, LatLng> _demoLocations = {
+    'SmartBin01': LatLng(22.36870, 70.79770),
+    'SmartBin02': LatLng(22.36910, 70.79840),
+    'SmartBin03': LatLng(22.36850, 70.79900),
+    'SmartBin04': LatLng(22.36790, 70.79920),
+    'SmartBin05': LatLng(22.36740, 70.79860),
+    'SmartBin06': LatLng(22.36720, 70.79780),
+    'SmartBin07': LatLng(22.36780, 70.79720),
+    'SmartBin08': LatLng(22.36850, 70.79710),
+  };
+
   @override
   void initState() {
     super.initState();
+
     BinStore.instance.addListener(_onBinsUpdated);
   }
 
@@ -29,7 +52,6 @@ class _MapScreenState extends State<MapScreen> {
 
     final bins = BinStore.instance.bins;
 
-    // Keep selected bin synchronized with the latest live data.
     if (_selectedBin != null) {
       try {
         _selectedBin = bins.firstWhere(
@@ -41,6 +63,10 @@ class _MapScreenState extends State<MapScreen> {
     }
 
     setState(() {});
+  }
+
+  LatLng? _getLocation(Bin bin) {
+    return _demoLocations[bin.id];
   }
 
   Color _getStatusColor(int fill) {
@@ -83,6 +109,17 @@ class _MapScreenState extends State<MapScreen> {
     );
   }
 
+  void _reportIssue(Bin bin) {
+    Navigator.pushNamed(
+      context,
+      '/report-issue',
+      arguments: {
+        'binId': bin.id,
+        'location': bin.location,
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final bins = BinStore.instance.bins;
@@ -113,7 +150,8 @@ class _MapScreenState extends State<MapScreen> {
                 _selectedBin = null;
               });
             },
-            icon: const Icon(Icons.refresh),
+            icon: const Icon(Icons.my_location),
+            tooltip: 'Center map',
           ),
         ],
       ),
@@ -122,7 +160,6 @@ class _MapScreenState extends State<MapScreen> {
           ? _buildLoadingState()
           : Column(
               children: [
-
                 // -----------------------------------------------------
                 // SUMMARY
                 // -----------------------------------------------------
@@ -135,7 +172,6 @@ class _MapScreenState extends State<MapScreen> {
                     16,
                     12,
                   ),
-
                   color: Colors.white,
 
                   child: Row(
@@ -164,19 +200,123 @@ class _MapScreenState extends State<MapScreen> {
                 ),
 
                 // -----------------------------------------------------
-                // INFORMATION
+                // MAP
+                // -----------------------------------------------------
+
+                SizedBox(
+                  height: 310,
+                  child: Stack(
+                    children: [
+                      FlutterMap(
+                        options: MapOptions(
+                          initialCenter: _campusCenter,
+                          initialZoom: 17.0,
+                          interactionOptions:
+                              const InteractionOptions(
+                            flags: InteractiveFlag.all,
+                          ),
+                        ),
+
+                        children: [
+                          TileLayer(
+                            urlTemplate:
+                                'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                            userAgentPackageName:
+                                'com.garbageguardian.app',
+                          ),
+
+                          MarkerLayer(
+                            markers: bins
+                                .map(
+                                  (bin) {
+                                    final location =
+                                        _getLocation(bin);
+
+                                    if (location == null) {
+                                      return null;
+                                    }
+
+                                    return Marker(
+                                      point: location,
+                                      width: 58,
+                                      height: 70,
+
+                                      child: GestureDetector(
+                                        onTap: () =>
+                                            _selectBin(bin),
+
+                                        child: _buildMarker(bin),
+                                      ),
+                                    );
+                                  },
+                                )
+                                .whereType<Marker>()
+                                .toList(),
+                          ),
+                        ],
+                      ),
+
+                      // DEMO LABEL
+                      Positioned(
+                        top: 10,
+                        left: 10,
+
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 6,
+                          ),
+
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(
+                              alpha: 0.92,
+                            ),
+
+                            borderRadius:
+                                BorderRadius.circular(20),
+                          ),
+
+                          child: const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                Icons.info_outline,
+                                size: 14,
+                                color: Colors.grey,
+                              ),
+
+                              SizedBox(width: 5),
+
+                              Text(
+                                'Demo bin locations',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: Colors.grey,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+
+                // -----------------------------------------------------
+                // LIVE INFORMATION
                 // -----------------------------------------------------
 
                 Container(
                   width: double.infinity,
                   margin: const EdgeInsets.fromLTRB(
                     16,
-                    14,
+                    12,
                     16,
                     8,
                   ),
 
-                  padding: const EdgeInsets.all(14),
+                  padding: const EdgeInsets.all(13),
 
                   decoration: BoxDecoration(
                     color: const Color(0xFFE8F5E9),
@@ -189,7 +329,7 @@ class _MapScreenState extends State<MapScreen> {
 
                     children: [
                       Icon(
-                        Icons.info_outline,
+                        Icons.sensors_outlined,
                         color: Color(0xFF2E7D32),
                       ),
 
@@ -197,12 +337,12 @@ class _MapScreenState extends State<MapScreen> {
 
                       Expanded(
                         child: Text(
-                          'Live smart bin locations are not available yet. '
-                          'The list below shows bins received from the '
-                          'monitoring system.',
+                          'Bin status and fill levels are updated '
+                          'from the live monitoring system. Map '
+                          'positions are demo locations for the prototype.',
                           style: TextStyle(
                             color: Color(0xFF285D2B),
-                            fontSize: 13,
+                            fontSize: 12,
                           ),
                         ),
                       ),
@@ -218,7 +358,7 @@ class _MapScreenState extends State<MapScreen> {
                   child: ListView.builder(
                     padding: const EdgeInsets.fromLTRB(
                       16,
-                      8,
+                      6,
                       16,
                       24,
                     ),
@@ -238,9 +378,87 @@ class _MapScreenState extends State<MapScreen> {
                 // -----------------------------------------------------
 
                 if (_selectedBin != null)
-                  _buildSelectedBinCard(_selectedBin!),
+                  _buildSelectedBinCard(
+                    _selectedBin!,
+                  ),
               ],
             ),
+    );
+  }
+
+  // -------------------------------------------------------------------
+  // MARKER
+  // -------------------------------------------------------------------
+
+  Widget _buildMarker(Bin bin) {
+    final fill = bin.fillLevel.round().clamp(0, 100);
+
+    final color = _getStatusColor(fill);
+
+    return Column(
+      children: [
+        Container(
+          width: 42,
+          height: 42,
+
+          decoration: BoxDecoration(
+            color: color,
+            shape: BoxShape.circle,
+
+            border: Border.all(
+              color: Colors.white,
+              width: 3,
+            ),
+
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(
+                  alpha: 0.25,
+                ),
+                blurRadius: 6,
+              ),
+            ],
+          ),
+
+          child: const Icon(
+            Icons.delete_outline,
+            color: Colors.white,
+            size: 23,
+          ),
+        ),
+
+        Container(
+          padding: const EdgeInsets.symmetric(
+            horizontal: 5,
+            vertical: 2,
+          ),
+
+          decoration: BoxDecoration(
+            color: Colors.white,
+
+            borderRadius:
+                BorderRadius.circular(5),
+
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(
+                  alpha: 0.15,
+                ),
+                blurRadius: 3,
+              ),
+            ],
+          ),
+
+          child: Text(
+            '$fill%',
+            style: TextStyle(
+              color: color,
+              fontSize: 10,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+        ),
+      ],
     );
   }
 
@@ -254,7 +472,8 @@ class _MapScreenState extends State<MapScreen> {
         padding: EdgeInsets.all(30),
 
         child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
+          mainAxisAlignment:
+              MainAxisAlignment.center,
 
           children: [
             Icon(
@@ -321,7 +540,8 @@ class _MapScreenState extends State<MapScreen> {
 
             decoration: BoxDecoration(
               color: color.withValues(alpha: 0.12),
-              borderRadius: BorderRadius.circular(12),
+              borderRadius:
+                  BorderRadius.circular(12),
             ),
 
             child: Icon(
@@ -379,16 +599,21 @@ class _MapScreenState extends State<MapScreen> {
     return InkWell(
       onTap: () => _selectBin(bin),
 
-      borderRadius: BorderRadius.circular(18),
+      borderRadius:
+          BorderRadius.circular(18),
 
       child: Container(
-        margin: const EdgeInsets.only(bottom: 12),
+        margin: const EdgeInsets.only(
+          bottom: 12,
+        ),
+
         padding: const EdgeInsets.all(16),
 
         decoration: BoxDecoration(
           color: Colors.white,
 
-          borderRadius: BorderRadius.circular(18),
+          borderRadius:
+              BorderRadius.circular(18),
 
           border: isSelected
               ? Border.all(
@@ -399,7 +624,9 @@ class _MapScreenState extends State<MapScreen> {
 
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withValues(alpha: 0.04),
+              color: Colors.black.withValues(
+                alpha: 0.04,
+              ),
               blurRadius: 8,
               offset: const Offset(0, 3),
             ),
@@ -408,19 +635,16 @@ class _MapScreenState extends State<MapScreen> {
 
         child: Column(
           children: [
-
             Row(
               children: [
-
-                // BIN ICON
                 Container(
                   width: 50,
                   height: 50,
 
                   decoration: BoxDecoration(
-                    color:
-                        statusColor.withValues(alpha: 0.1),
-
+                    color: statusColor.withValues(
+                      alpha: 0.1,
+                    ),
                     borderRadius:
                         BorderRadius.circular(14),
                   ),
@@ -434,7 +658,6 @@ class _MapScreenState extends State<MapScreen> {
 
                 const SizedBox(width: 13),
 
-                // BIN DETAILS
                 Expanded(
                   child: Column(
                     crossAxisAlignment:
@@ -456,14 +679,14 @@ class _MapScreenState extends State<MapScreen> {
                         style: TextStyle(
                           color: statusColor,
                           fontSize: 12,
-                          fontWeight: FontWeight.w600,
+                          fontWeight:
+                              FontWeight.w600,
                         ),
                       ),
                     ],
                   ),
                 ),
 
-                // FILL
                 Text(
                   '$fill%',
                   style: TextStyle(
@@ -477,9 +700,9 @@ class _MapScreenState extends State<MapScreen> {
 
             const SizedBox(height: 13),
 
-            // PROGRESS
             ClipRRect(
-              borderRadius: BorderRadius.circular(10),
+              borderRadius:
+                  BorderRadius.circular(10),
 
               child: LinearProgressIndicator(
                 value: fill / 100,
@@ -503,15 +726,17 @@ class _MapScreenState extends State<MapScreen> {
 
               children: [
                 Container(
-                  padding: const EdgeInsets.symmetric(
+                  padding:
+                      const EdgeInsets.symmetric(
                     horizontal: 9,
                     vertical: 5,
                   ),
 
                   decoration: BoxDecoration(
                     color:
-                        statusColor.withValues(alpha: 0.1),
-
+                        statusColor.withValues(
+                      alpha: 0.1,
+                    ),
                     borderRadius:
                         BorderRadius.circular(20),
                   ),
@@ -521,17 +746,15 @@ class _MapScreenState extends State<MapScreen> {
                     style: TextStyle(
                       color: statusColor,
                       fontSize: 11,
-                      fontWeight: FontWeight.w600,
+                      fontWeight:
+                          FontWeight.w600,
                     ),
                   ),
                 ),
 
-                Text(
-                  bin.location.isEmpty
-                      ? 'Location unavailable'
-                      : bin.location,
-
-                  style: const TextStyle(
+                const Text(
+                  'Demo location',
+                  style: TextStyle(
                     color: Colors.grey,
                     fontSize: 11,
                   ),
@@ -545,7 +768,7 @@ class _MapScreenState extends State<MapScreen> {
   }
 
   // -------------------------------------------------------------------
-  // SELECTED BIN CARD
+  // SELECTED BIN
   // -------------------------------------------------------------------
 
   Widget _buildSelectedBinCard(Bin bin) {
@@ -568,20 +791,22 @@ class _MapScreenState extends State<MapScreen> {
 
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.12),
+            color: Colors.black.withValues(
+              alpha: 0.12,
+            ),
             blurRadius: 15,
             offset: const Offset(0, -4),
           ),
         ],
 
-        borderRadius: const BorderRadius.vertical(
+        borderRadius:
+            const BorderRadius.vertical(
           top: Radius.circular(22),
         ),
       ),
 
       child: Column(
         children: [
-
           Row(
             children: [
               Expanded(
@@ -624,7 +849,6 @@ class _MapScreenState extends State<MapScreen> {
 
           Row(
             children: [
-
               Expanded(
                 child: _selectedInfo(
                   'Fill Level',
@@ -645,36 +869,92 @@ class _MapScreenState extends State<MapScreen> {
 
           const SizedBox(height: 14),
 
-          SizedBox(
-            width: double.infinity,
-            height: 48,
+          // -----------------------------------------------------------
+          // ACTION BUTTONS
+          // -----------------------------------------------------------
 
-            child: ElevatedButton.icon(
-              onPressed: () => _openDetails(bin),
+          Row(
+            children: [
+              // VIEW DETAILS
+              Expanded(
+                child: SizedBox(
+                  height: 48,
 
-              icon: const Icon(
-                Icons.visibility_outlined,
-              ),
+                  child: ElevatedButton.icon(
+                    onPressed: () =>
+                        _openDetails(bin),
 
-              label: const Text(
-                'View Bin Details',
-                style: TextStyle(
-                  fontWeight: FontWeight.bold,
+                    icon: const Icon(
+                      Icons.visibility_outlined,
+                      size: 20,
+                    ),
+
+                    label: const Text(
+                      'Details',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+
+                    style:
+                        ElevatedButton.styleFrom(
+                      backgroundColor:
+                          const Color(0xFF2E7D32),
+                      foregroundColor:
+                          Colors.white,
+
+                      shape:
+                          RoundedRectangleBorder(
+                        borderRadius:
+                            BorderRadius.circular(13),
+                      ),
+                    ),
+                  ),
                 ),
               ),
 
-              style: ElevatedButton.styleFrom(
-                backgroundColor:
-                    const Color(0xFF2E7D32),
+              const SizedBox(width: 10),
 
-                foregroundColor: Colors.white,
+              // REPORT ISSUE
+              Expanded(
+                child: SizedBox(
+                  height: 48,
 
-                shape: RoundedRectangleBorder(
-                  borderRadius:
-                      BorderRadius.circular(13),
+                  child: OutlinedButton.icon(
+                    onPressed: () =>
+                        _reportIssue(bin),
+
+                    icon: const Icon(
+                      Icons.report_problem_outlined,
+                      size: 20,
+                    ),
+
+                    label: const Text(
+                      'Report',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+
+                    style:
+                        OutlinedButton.styleFrom(
+                      foregroundColor: Colors.red,
+
+                      side: const BorderSide(
+                        color: Colors.red,
+                        width: 1.5,
+                      ),
+
+                      shape:
+                          RoundedRectangleBorder(
+                        borderRadius:
+                            BorderRadius.circular(13),
+                      ),
+                    ),
+                  ),
                 ),
               ),
-            ),
+            ],
           ),
         ],
       ),

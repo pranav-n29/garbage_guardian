@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+
 import '../../models/bin.dart';
 import '../../services/bin_store.dart';
+import '../../services/api_service.dart';
 
 class NotificationsScreen extends StatefulWidget {
   const NotificationsScreen({super.key});
@@ -14,22 +16,17 @@ class _NotificationsScreenState
     extends State<NotificationsScreen> {
   int selectedTab = 0;
 
-  // Keeps track of notifications the citizen has read.
+  // Keeps track of Smart Bin notifications the citizen has read.
   final Set<String> _readBinNotifications = {};
 
-  // Temporary report activity.
-  // This will later be replaced by real backend report data.
-  final List<Map<String, dynamic>> activityNotifications = [
-    {
-      'type': 'info',
-      'icon': Icons.assignment_outlined,
-      'title': 'Report Activity',
-      'message':
-          'Your submitted reports will appear here with their latest status.',
-      'time': 'Available after report submission',
-      'read': true,
-    },
-  ];
+  // Keeps track of report activity notifications the citizen has read.
+  final Set<String> _readActivityNotifications = {};
+
+  // Real report activity from backend.
+  List<Map<String, dynamic>> activityNotifications = [];
+
+  bool _activityLoading = false;
+  String? _activityError;
 
   @override
   void initState() {
@@ -48,6 +45,145 @@ class _NotificationsScreenState
     if (mounted) {
       setState(() {});
     }
+  }
+
+  // -------------------------------------------------------------------
+  // LOAD REPORT ACTIVITY FROM BACKEND
+  // -------------------------------------------------------------------
+
+  Future<void> _loadActivityNotifications() async {
+    setState(() {
+      _activityLoading = true;
+      _activityError = null;
+    });
+
+    try {
+      final result =
+          await ApiService.instance.getMyReports();
+
+      if (!mounted) return;
+
+      final reports = result['reports'];
+
+      if (reports is List) {
+        final List<Map<String, dynamic>> notifications = [];
+
+        for (final item in reports) {
+          if (item is! Map) continue;
+
+          final report =
+              Map<String, dynamic>.from(item);
+
+          final reportId =
+              report['reportId']?.toString() ??
+                  report['id']?.toString() ??
+                  'Report';
+
+          final status =
+              report['status']?.toString() ??
+                  'Pending';
+
+          final issueType =
+              report['issueType']?.toString() ??
+                  'Reported Issue';
+
+          final binId =
+              report['binId']?.toString() ??
+                  'Smart Bin';
+
+          notifications.add({
+            'id': reportId,
+            'type': _activityType(status),
+            'icon': _activityIcon(status),
+            'title': '$reportId • $status',
+            'message':
+                '$issueType reported for $binId.',
+            'location':
+                report['location']?.toString() ?? '',
+            'time': _activityTime(report),
+            'read':
+                _readActivityNotifications
+                    .contains(reportId),
+          });
+        }
+
+        setState(() {
+          activityNotifications = notifications;
+          _activityLoading = false;
+        });
+      } else {
+        setState(() {
+          activityNotifications = [];
+          _activityLoading = false;
+        });
+      }
+    } catch (e) {
+      if (!mounted) return;
+
+      setState(() {
+        _activityLoading = false;
+        _activityError =
+            e.toString().replaceFirst(
+                  'Exception: ',
+                  '',
+                );
+      });
+    }
+  }
+
+  String _activityType(String status) {
+    switch (status.toLowerCase()) {
+      case 'resolved':
+      case 'completed':
+        return 'success';
+
+      case 'in progress':
+      case 'processing':
+        return 'info';
+
+      case 'rejected':
+        return 'critical';
+
+      default:
+        return 'warning';
+    }
+  }
+
+  IconData _activityIcon(String status) {
+    switch (status.toLowerCase()) {
+      case 'resolved':
+      case 'completed':
+        return Icons.check_circle_outline;
+
+      case 'in progress':
+      case 'processing':
+        return Icons.sync;
+
+      case 'rejected':
+        return Icons.cancel_outlined;
+
+      default:
+        return Icons.pending_actions_outlined;
+    }
+  }
+
+  String _activityTime(
+    Map<String, dynamic> report,
+  ) {
+    final rawDate =
+        report['createdAt']?.toString();
+
+    if (rawDate == null || rawDate.isEmpty) {
+      return 'Recently';
+    }
+
+    final date = DateTime.tryParse(rawDate);
+
+    if (date == null) {
+      return 'Recently';
+    }
+
+    return _formatLastUpdated(date);
   }
 
   // -------------------------------------------------------------------
@@ -83,7 +219,9 @@ class _NotificationsScreenState
             ? 'This smart bin is $fill% full. Consider using another available bin.'
             : 'This smart bin is currently $fill% full. Please consider another bin if possible.',
         'location': bin.location,
-        'time': _formatLastUpdated(bin.lastUpdated),
+        'time': _formatLastUpdated(
+          bin.lastUpdated,
+        ),
         'read': _readBinNotifications.contains(
           '${bin.id}_$fill',
         ),
@@ -93,11 +231,17 @@ class _NotificationsScreenState
     // Highest fill level first.
     notifications.sort(
       (a, b) {
-        final String aId = a['id'].toString();
-        final String bId = b['id'].toString();
+        final String aId =
+            a['id'].toString();
 
-        final int aFill = _extractFillFromId(aId);
-        final int bFill = _extractFillFromId(bId);
+        final String bId =
+            b['id'].toString();
+
+        final int aFill =
+            _extractFillFromId(aId);
+
+        final int bFill =
+            _extractFillFromId(bId);
 
         return bFill.compareTo(aFill);
       },
@@ -123,14 +267,19 @@ class _NotificationsScreenState
   void _markNotificationAsRead(
     Map<String, dynamic> notification,
   ) {
-    final id = notification['id']?.toString();
+    final id =
+        notification['id']?.toString();
 
     if (id == null) {
       return;
     }
 
     setState(() {
-      _readBinNotifications.add(id);
+      if (selectedTab == 0) {
+        _readBinNotifications.add(id);
+      } else {
+        _readActivityNotifications.add(id);
+      }
     });
   }
 
@@ -139,10 +288,17 @@ class _NotificationsScreenState
   ) {
     setState(() {
       for (final notification in notifications) {
-        final id = notification['id']?.toString();
+        final id =
+            notification['id']?.toString();
 
-        if (id != null) {
+        if (id == null) {
+          continue;
+        }
+
+        if (selectedTab == 0) {
           _readBinNotifications.add(id);
+        } else {
+          _readActivityNotifications.add(id);
         }
       }
     });
@@ -182,12 +338,21 @@ class _NotificationsScreenState
         ),
 
         actions: [
+          if (selectedTab == 1)
+            IconButton(
+              onPressed:
+                  _activityLoading
+                      ? null
+                      : _loadActivityNotifications,
+              icon: const Icon(Icons.refresh),
+              tooltip: 'Refresh activity',
+            ),
+
           if (unreadCount > 0)
             TextButton(
               onPressed: () {
                 _markAllAsRead(notifications);
               },
-
               child: const Text(
                 'Mark all read',
                 style: TextStyle(
@@ -201,7 +366,6 @@ class _NotificationsScreenState
 
       body: Column(
         children: [
-
           // -----------------------------------------------------------
           // HEADER
           // -----------------------------------------------------------
@@ -220,7 +384,6 @@ class _NotificationsScreenState
 
             child: Row(
               children: [
-
                 Container(
                   width: 48,
                   height: 48,
@@ -260,7 +423,6 @@ class _NotificationsScreenState
                         selectedTab == 0
                             ? 'Live updates from smart bins'
                             : 'Updates about your reports',
-
                         style: const TextStyle(
                           color: Colors.grey,
                           fontSize: 12,
@@ -289,7 +451,6 @@ class _NotificationsScreenState
 
             child: Row(
               children: [
-
                 Expanded(
                   child: _tabButton(
                     title: 'Smart Bins',
@@ -318,20 +479,44 @@ class _NotificationsScreenState
           // -----------------------------------------------------------
 
           Expanded(
-            child: notifications.isEmpty
-                ? _emptyState()
-                : ListView.builder(
-                    padding: const EdgeInsets.all(16),
-
-                    itemCount:
-                        notifications.length,
-
-                    itemBuilder: (context, index) {
-                      return _notificationCard(
-                        notifications[index],
-                      );
-                    },
-                  ),
+            child: selectedTab == 1 &&
+                    _activityLoading
+                ? const Center(
+                    child: CircularProgressIndicator(
+                      color: Color(0xFF2E7D32),
+                    ),
+                  )
+                : selectedTab == 1 &&
+                        _activityError != null
+                    ? _activityErrorState()
+                    : notifications.isEmpty
+                        ? _emptyState()
+                        : RefreshIndicator(
+                            onRefresh:
+                                selectedTab == 1
+                                    ? _loadActivityNotifications
+                                    : () async {
+                                        if (mounted) {
+                                          setState(() {});
+                                        }
+                                      },
+                            color:
+                                const Color(0xFF2E7D32),
+                            child: ListView.builder(
+                              physics:
+                                  const AlwaysScrollableScrollPhysics(),
+                              padding:
+                                  const EdgeInsets.all(16),
+                              itemCount:
+                                  notifications.length,
+                              itemBuilder:
+                                  (context, index) {
+                                return _notificationCard(
+                                  notifications[index],
+                                );
+                              },
+                            ),
+                          ),
           ),
         ],
       ),
@@ -355,6 +540,11 @@ class _NotificationsScreenState
         setState(() {
           selectedTab = index;
         });
+
+        if (index == 1 &&
+            activityNotifications.isEmpty) {
+          _loadActivityNotifications();
+        }
       },
 
       borderRadius:
@@ -429,7 +619,7 @@ class _NotificationsScreenState
 
     final Color color =
         _getNotificationColor(
-      notification['type'],
+      notification['type']?.toString(),
     );
 
     return InkWell(
@@ -469,7 +659,6 @@ class _NotificationsScreenState
               CrossAxisAlignment.start,
 
           children: [
-
             // ICON
             Container(
               width: 46,
@@ -499,16 +688,16 @@ class _NotificationsScreenState
                     CrossAxisAlignment.start,
 
                 children: [
-
                   Row(
                     crossAxisAlignment:
                         CrossAxisAlignment.start,
 
                     children: [
-
                       Expanded(
                         child: Text(
-                          notification['title'],
+                          notification['title']
+                              ?.toString() ??
+                              'Notification',
 
                           style: TextStyle(
                             fontSize: 15,
@@ -545,7 +734,9 @@ class _NotificationsScreenState
                   const SizedBox(height: 6),
 
                   Text(
-                    notification['message'],
+                    notification['message']
+                            ?.toString() ??
+                        '',
 
                     style: const TextStyle(
                       color: Colors.grey,
@@ -561,11 +752,10 @@ class _NotificationsScreenState
                     runSpacing: 5,
 
                     children: [
-
-                      // BIN ID / LOCATION
+                      // LOCATION
                       if (notification['location']
-                          ?.toString()
-                          .isNotEmpty ==
+                              ?.toString()
+                              .isNotEmpty ==
                           true)
                         Row(
                           mainAxisSize:
@@ -573,7 +763,8 @@ class _NotificationsScreenState
 
                           children: [
                             const Icon(
-                              Icons.location_on_outlined,
+                              Icons
+                                  .location_on_outlined,
                               size: 14,
                               color: Colors.grey,
                             ),
@@ -581,8 +772,8 @@ class _NotificationsScreenState
                             const SizedBox(width: 3),
 
                             Text(
-                              notification[
-                                  'location'],
+                              notification['location']
+                                  .toString(),
 
                               style:
                                   const TextStyle(
@@ -608,7 +799,9 @@ class _NotificationsScreenState
                           const SizedBox(width: 3),
 
                           Text(
-                            notification['time'],
+                            notification['time']
+                                    ?.toString() ??
+                                'Recently',
 
                             style:
                                 const TextStyle(
@@ -621,6 +814,70 @@ class _NotificationsScreenState
                     ],
                   ),
                 ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // -------------------------------------------------------------------
+  // ACTIVITY ERROR STATE
+  // -------------------------------------------------------------------
+
+  Widget _activityErrorState() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(30),
+
+        child: Column(
+          mainAxisAlignment:
+              MainAxisAlignment.center,
+
+          children: [
+            const Icon(
+              Icons.cloud_off_outlined,
+              size: 60,
+              color: Colors.grey,
+            ),
+
+            const SizedBox(height: 16),
+
+            const Text(
+              'Unable to load activity',
+              style: TextStyle(
+                fontSize: 19,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+
+            const SizedBox(height: 8),
+
+            Text(
+              _activityError ??
+                  'Something went wrong.',
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                color: Colors.grey,
+                fontSize: 12,
+              ),
+            ),
+
+            const SizedBox(height: 18),
+
+            ElevatedButton.icon(
+              onPressed:
+                  _loadActivityNotifications,
+
+              icon: const Icon(Icons.refresh),
+
+              label: const Text('Try Again'),
+
+              style: ElevatedButton.styleFrom(
+                backgroundColor:
+                    const Color(0xFF2E7D32),
+                foregroundColor: Colors.white,
               ),
             ),
           ],
@@ -644,7 +901,6 @@ class _NotificationsScreenState
               MainAxisAlignment.center,
 
           children: [
-
             Container(
               width: 90,
               height: 90,
@@ -667,9 +923,12 @@ class _NotificationsScreenState
 
             const SizedBox(height: 20),
 
-            const Text(
-              'No notifications',
-              style: TextStyle(
+            Text(
+              selectedTab == 0
+                  ? 'No notifications'
+                  : 'No activity yet',
+
+              style: const TextStyle(
                 fontSize: 20,
                 fontWeight:
                     FontWeight.bold,
@@ -678,12 +937,15 @@ class _NotificationsScreenState
 
             const SizedBox(height: 8),
 
-            const Text(
-              'There are no high-fill smart bin alerts right now.',
+            Text(
+              selectedTab == 0
+                  ? 'There are no high-fill smart bin alerts right now.'
+                  : 'Your submitted reports will appear here.',
+
               textAlign:
                   TextAlign.center,
 
-              style: TextStyle(
+              style: const TextStyle(
                 color: Colors.grey,
                 fontSize: 13,
                 height: 1.4,
@@ -711,6 +973,9 @@ class _NotificationsScreenState
 
       case 'success':
         return const Color(0xFF2E7D32);
+
+      case 'info':
+        return Colors.blue;
 
       default:
         return Colors.blue;

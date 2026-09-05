@@ -1,5 +1,5 @@
 import 'package:socket_io_client/socket_io_client.dart' as io;
-
+import 'package:flutter/foundation.dart';
 class SocketService {
   io.Socket? _socket;
 
@@ -17,28 +17,28 @@ class SocketService {
     );
 
     _socket!.onConnect((_) {
-      print('✅ Socket.IO connected to EC2');
-      print('Socket ID: ${_socket!.id}');
+      debugPrint('✅ Socket.IO connected to EC2');
+      debugPrint('Socket ID: ${_socket!.id}');
     });
 
     _socket!.onDisconnect((reason) {
-      print('❌ Socket.IO disconnected: $reason');
+      debugPrint('❌ Socket.IO disconnected: $reason');
     });
 
     _socket!.onConnectError((error) {
-      print('❌ Socket.IO connection error: $error');
+      debugPrint('❌ Socket.IO connection error: $error');
     });
 
     _socket!.onError((error) {
-      print('❌ Socket.IO error: $error');
+      debugPrint('❌ Socket.IO error: $error');
     });
 
     _socket!.on('connection-status', (data) {
-      print('Connection status: $data');
+      debugPrint('Connection status: $data');
     });
 
     _socket!.on('smartbin-data', (data) {
-      print('📦 SMART BIN DATA RECEIVED: $data');
+      debugPrint('📦 SMART BIN DATA RECEIVED: $data');
       onSmartBinData?.call(data);
     });
 
@@ -49,5 +49,6 @@ class SocketService {
     _socket?.disconnect();
     _socket?.dispose();
     _socket = null;
+    debugPrint('Socket.IO disconnected');
   }
 }

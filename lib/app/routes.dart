@@ -1,17 +1,16 @@
 import 'package:flutter/material.dart';
+
 import '../screens/splash/splash_screen.dart';
 import '../screens/auth/login_screen.dart';
 import '../screens/auth/signup_screen.dart';
 import '../screens/home/home_screen.dart';
-import '../screens/bins/bin_details_screen.dart';
+import '../screens/bins/bin_details_screen.dart' as bin_details;
 import '../screens/map/map_screen.dart';
-import '../screens/reports/report_issues_screen.dart';
+import '../screens/reports/report_issues_screen.dart' as reports;
 import '../screens/reports/my_reports_screen.dart';
 import '../screens/notifications/notifications_screen.dart';
 import '../screens/awareness/awareness_screen.dart';
 import '../screens/profile/profile_screen.dart';
-
-
 
 class AppRoutes {
   static const String splash = '/';
@@ -26,8 +25,9 @@ class AppRoutes {
   static const String awareness = '/awareness';
   static const String profile = '/profile';
 
-
-  static Route<dynamic> generateRoute(RouteSettings settings) {
+  static Route<dynamic> generateRoute(
+    RouteSettings settings,
+  ) {
     switch (settings.name) {
       case splash:
         return MaterialPageRoute(
@@ -50,10 +50,10 @@ class AppRoutes {
         );
 
       case binDetails:
-  return MaterialPageRoute(
-    settings: settings,
-    builder: (_) => const BinDetailsScreen(),
-  );
+        return MaterialPageRoute(
+          settings: settings,
+          builder: (_) => const bin_details.BinDetailsScreen(),
+        );
 
       case map:
         return MaterialPageRoute(
@@ -62,7 +62,8 @@ class AppRoutes {
 
       case reportIssue:
         return MaterialPageRoute(
-          builder: (_) => const ReportIssuesScreen(),
+          settings: settings,
+          builder: (_) => const reports.ReportIssuesScreen(),
         );
 
       case myReports:
@@ -85,23 +86,23 @@ class AppRoutes {
           builder: (_) => const ProfileScreen(),
         );
 
-    default:
-  return MaterialPageRoute(
-    builder: (_) => Scaffold(
-      appBar: AppBar(
-        title: const Text('Route Error'),
-      ),
-      body: Center(
-        child: Text(
-          'Unknown route: ${settings.name}',
-          style: const TextStyle(
-            fontSize: 18,
-            fontWeight: FontWeight.bold,
+      default:
+        return MaterialPageRoute(
+          builder: (_) => Scaffold(
+            appBar: AppBar(
+              title: const Text('Route Error'),
+            ),
+            body: Center(
+              child: Text(
+                'Unknown route: ${settings.name}',
+                style: const TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
           ),
-        ),
-      ),
-    ),
-  );
+        );
     }
   }
 }

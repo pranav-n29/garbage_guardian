@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../models/bin.dart';
 import '../../services/bin_store.dart';
-import '../../services/report_store.dart';
+import '../../services/api_service.dart';
 
 class ReportIssuesScreen extends StatefulWidget {
   const ReportIssuesScreen({super.key});
@@ -18,11 +18,12 @@ class _ReportIssuesScreenState
   final TextEditingController _descriptionController =
       TextEditingController();
 
-  String? _selectedIssue;
-  String? _selectedBinId;
-  String _selectedLocation = 'Location unavailable';
+String? _selectedIssue;
+String? _selectedBinId;
+String _selectedLocation = 'Location unavailable';
 
-  bool _isSubmitting = false;
+bool _isSubmitting = false;
+bool _routeArgumentsLoaded = false;
 
   final List<String> _issueTypes = [
     'Bin is Full',
@@ -70,74 +71,68 @@ class _ReportIssuesScreenState
   void didChangeDependencies() {
     super.didChangeDependencies();
 
-    final arguments =
-        ModalRoute.of(context)?.settings.arguments;
+  if (_routeArgumentsLoaded) return;
 
-    if (arguments is Map) {
-      final binId = arguments['binId']?.toString();
+  _routeArgumentsLoaded = true;
 
-      if (binId != null && binId.isNotEmpty) {
-        _selectedBinId = binId;
+  final arguments = ModalRoute.of(context)?.settings.arguments;
 
-        final location =
-            arguments['location']?.toString();
+  if (arguments is Map) {
+    final binId = arguments['binId']?.toString();
 
-        if (location != null && location.isNotEmpty) {
-          _selectedLocation = location;
+    if (binId != null && binId.isNotEmpty) {
+      final bins = BinStore.instance.bins;
+
+      Bin? selectedBin;
+
+      for (final bin in bins) {
+        if (bin.id == binId) {
+          selectedBin = bin;
+          break;
         }
+      }
 
-        final bin = BinStore.instance.bins
-            .cast<Bin?>()
-            .firstWhere(
-              (item) => item?.id == binId,
-              orElse: () => null,
-            );
+      _selectedBinId = binId;
 
-        if (bin != null) {
-          _selectedLocation =
-              bin.location.isEmpty
-                  ? 'Location unavailable'
-                  : bin.location;
-        }
+      final location =
+          arguments['location']?.toString();
+
+      if (selectedBin != null) {
+        _selectedLocation =
+            selectedBin.location.isEmpty
+                ? 'Location unavailable'
+                : selectedBin.location;
+      } else if (location != null && location.isNotEmpty) {
+        _selectedLocation = location;
       }
     }
   }
+}
 
-  Future<void> _submitReport() async {
-    if (!_formKey.currentState!.validate()) {
-      return;
-    }
+ Future<void> _submitReport() async {
+  if (!_formKey.currentState!.validate()) {
+    return;
+  }
 
-    if (_selectedBinId == null ||
-        _selectedBinId!.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Please select a smart bin.',
-          ),
-        ),
-      );
-      return;
-    }
-
-    setState(() {
-      _isSubmitting = true;
-    });
-
-    // Temporary local submission.
-    // This will be replaced with the backend API
-    // when the report endpoint is provided.
-
-    await Future.delayed(
-      const Duration(milliseconds: 600),
+  if (_selectedBinId == null || _selectedBinId!.isEmpty) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Please select a smart bin.'),
+      ),
     );
+    return;
+  }
 
-    ReportStore.instance.addReport(
+  setState(() {
+    _isSubmitting = true;
+  });
+
+  try {
+    final result = await ApiService.instance.createReport(
       binId: _selectedBinId!,
       location: _selectedLocation,
       issueType: _selectedIssue!,
-      description:
-          _descriptionController.text.trim(),
+      description: _descriptionController.text.trim(),
     );
 
     if (!mounted) return;
@@ -146,8 +141,34 @@ class _ReportIssuesScreenState
       _isSubmitting = false;
     });
 
-    _showSuccessDialog();
+    if (result['success'] == true) {
+      _showSuccessDialog();
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            result['message']?.toString() ??
+                'Failed to submit report',
+          ),
+        ),
+      );
+    }
+  } catch (e) {
+    if (!mounted) return;
+
+    setState(() {
+      _isSubmitting = false;
+    });
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          e.toString().replaceFirst('Exception: ', ''),
+        ),
+      ),
+    );
   }
+}
 
   void _showSuccessDialog() {
     showDialog(
