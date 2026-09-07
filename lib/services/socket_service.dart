@@ -7,7 +7,7 @@ class SocketService {
     void Function(dynamic data)? onSmartBinData,
   }) {
     _socket = io.io(
-      'http://13.239.62.11:3001',
+      'http://3.26.184.112:3001',
       <String, dynamic>{
         'transports': ['websocket'],
         'autoConnect': false,
