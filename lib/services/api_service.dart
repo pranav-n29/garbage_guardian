@@ -9,7 +9,7 @@ class ApiService {
   static final ApiService instance = ApiService._();
 
   static const String baseUrl =
-      'http://10.150.12.116:5000/api';
+    'http://3.26.184.112/api';
 
   static const String _tokenKey = 'auth_token';
 
