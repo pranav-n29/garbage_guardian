@@ -1,6 +1,13 @@
+
+import 'dart:async';
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:geolocator/geolocator.dart';
+import 'package:http/http.dart' as http;
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../models/bin.dart';
 import '../../services/bin_store.dart';
@@ -13,92 +20,159 @@ class MapScreen extends StatefulWidget {
 }
 
 class _MapScreenState extends State<MapScreen> {
+  final MapController _mapController = MapController();
+
   Bin? _selectedBin;
 
-  // Marwadi University demo center.
-  static const LatLng _campusCenter = LatLng(
-    22.368298,
-    70.798212,
-  );
+  bool _hasCenteredOnLocation = false;
+  bool _isNavigating = false;
+  bool _isLoadingRoute = false;
 
-  // DEMO locations only.
-  // Replace these with actual bin coordinates later.
-  final Map<String, LatLng> _demoLocations = {
-    'SmartBin01': LatLng(22.36870, 70.79770),
-    'SmartBin02': LatLng(22.36910, 70.79840),
-    'SmartBin03': LatLng(22.36850, 70.79900),
-    'SmartBin04': LatLng(22.36790, 70.79920),
-    'SmartBin05': LatLng(22.36740, 70.79860),
-    'SmartBin06': LatLng(22.36720, 70.79780),
-    'SmartBin07': LatLng(22.36780, 70.79720),
-    'SmartBin08': LatLng(22.36850, 70.79710),
-  };
+  LatLng? _userLocation;
 
-  @override
-  void initState() {
-    super.initState();
+  List<LatLng> _routePoints = [];
 
-    BinStore.instance.addListener(_onBinsUpdated);
-  }
+  double? _routeDistance;
+  double? _routeDuration;
+
+  StreamSubscription<Position>? _positionSubscription;
+
+  static const LatLng _fallbackCenter =
+      LatLng(20.5937, 78.9629);
+
+@override
+@override
+void initState() {
+  super.initState();
+
+  BinStore.instance.addListener(_onBinsUpdated);
+
+  WidgetsBinding.instance.addPostFrameCallback((_) async {
+    if (!mounted) return;
+
+    final arguments = ModalRoute.of(context)?.settings.arguments;
+
+    if (arguments is Bin) {
+      // Select the bin received from Bin Details.
+      _selectBin(arguments);
+
+      // Automatically calculate and display its route.
+      await _navigateToBin(arguments);
+    }
+  });
+}
 
   @override
   void dispose() {
     BinStore.instance.removeListener(_onBinsUpdated);
+    _positionSubscription?.cancel();
+    _mapController.dispose();
     super.dispose();
+  }
+
+  // --------------------------------------------------
+  // BIN LOCATION
+  // --------------------------------------------------
+
+  LatLng? _getLocation(Bin bin) {
+    if (!bin.hasLocation) return null;
+
+    return LatLng(
+      bin.latitude,
+      bin.longitude,
+    );
+  }
+
+  LatLng? _firstValidLocation(List<Bin> bins) {
+    for (final bin in bins) {
+      final location = _getLocation(bin);
+      if (location != null) return location;
+    }
+
+    return null;
   }
 
   void _onBinsUpdated() {
     if (!mounted) return;
 
     final bins = BinStore.instance.bins;
+    LatLng? newLocation;
 
     if (_selectedBin != null) {
-      try {
-        _selectedBin = bins.firstWhere(
-          (bin) => bin.id == _selectedBin!.id,
-        );
-      } catch (_) {
+      final updatedBins = bins.where(
+        (bin) => bin.id == _selectedBin!.id,
+      );
+
+      if (updatedBins.isNotEmpty) {
+        _selectedBin = updatedBins.first;
+      } else {
         _selectedBin = null;
       }
     }
 
-    setState(() {});
-  }
-
-  LatLng? _getLocation(Bin bin) {
-    return _demoLocations[bin.id];
-  }
-
-  Color _getStatusColor(int fill) {
-    if (fill >= 81) {
-      return Colors.red;
+    if (!_hasCenteredOnLocation) {
+      newLocation = _firstValidLocation(bins);
     }
 
+    setState(() {});
+
+    if (newLocation != null) {
+      _hasCenteredOnLocation = true;
+
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+
+        try {
+          _mapController.move(newLocation!, 15);
+        } catch (_) {}
+      });
+    }
+  }
+
+  // --------------------------------------------------
+  // BIN STATUS
+  // --------------------------------------------------
+
+  Color _getStatusColor(num fill) {
+    if (fill >= 81) return Colors.red;
+
     if (fill >= 51) {
-      return Colors.orange;
+      return const Color.fromARGB(255, 215, 164, 89);
     }
 
     return const Color(0xFF2E7D32);
   }
 
   String _getStatusText(Bin bin) {
-    final fill = bin.fillLevel.round().clamp(0, 100);
+    if (!bin.hasSensorData) {
+      return 'Awaiting Sensor Data';
+    }
 
-    if (fill >= 81) {
+    if (bin.fillLevel >= 81) {
       return 'High Fill Level';
     }
 
-    if (fill >= 51) {
+    if (bin.fillLevel >= 51) {
       return 'Moderate Fill Level';
     }
 
     return 'Normal Fill Level';
   }
 
+  // --------------------------------------------------
+  // SELECT BIN
+  // --------------------------------------------------
+
   void _selectBin(Bin bin) {
     setState(() {
       _selectedBin = bin;
     });
+
+    final location = _getLocation(bin);
+
+    if (location != null) {
+      _mapController.move(location, 16);
+    }
   }
 
   void _openDetails(Bin bin) {
@@ -120,13 +194,263 @@ class _MapScreenState extends State<MapScreen> {
     );
   }
 
+  // --------------------------------------------------
+  // LOCATION PERMISSION
+  // --------------------------------------------------
+
+  Future<Position> _getCurrentPosition() async {
+    final serviceEnabled =
+        await Geolocator.isLocationServiceEnabled();
+
+    if (!serviceEnabled) {
+      throw Exception(
+        'Please enable your device location services.',
+      );
+    }
+
+    LocationPermission permission =
+        await Geolocator.checkPermission();
+
+    if (permission == LocationPermission.denied) {
+      permission = await Geolocator.requestPermission();
+    }
+
+    if (permission == LocationPermission.denied) {
+      throw Exception(
+        'Location permission was denied.',
+      );
+    }
+
+    if (permission == LocationPermission.deniedForever) {
+      throw Exception(
+        'Location permission is permanently denied. Enable it in browser or device settings.',
+      );
+    }
+
+    return Geolocator.getCurrentPosition(
+      locationSettings: const LocationSettings(
+        accuracy: LocationAccuracy.high,
+        timeLimit: Duration(seconds: 20),
+      ),
+    );
+  }
+
+  // --------------------------------------------------
+  // CALCULATE IN-APP ROUTE
+  // --------------------------------------------------
+
+  Future<void> _navigateToBin(Bin bin) async {
+    final destination = _getLocation(bin);
+
+    if (destination == null) {
+      _showMessage(
+        'Valid GPS coordinates are unavailable for this bin.',
+      );
+      return;
+    }
+
+    setState(() {
+      _isLoadingRoute = true;
+      _selectedBin = bin;
+    });
+
+    try {
+      // Get current user position.
+      final position = await _getCurrentPosition();
+
+      final origin = LatLng(
+        position.latitude,
+        position.longitude,
+      );
+
+      // OSRM expects longitude,latitude.
+      final uri = Uri.parse(
+        'https://router.project-osrm.org/route/v1/driving/'
+        '${origin.longitude},${origin.latitude};'
+        '${destination.longitude},${destination.latitude}'
+        '?overview=full&geometries=geojson',
+      );
+
+      final response = await http
+          .get(uri)
+          .timeout(const Duration(seconds: 20));
+
+      if (response.statusCode != 200) {
+        throw Exception(
+          'The routing service is currently unavailable.',
+        );
+      }
+
+      final data = jsonDecode(response.body);
+
+      if (data['code'] != 'Ok' ||
+          (data['routes'] as List).isEmpty) {
+        throw Exception(
+          'No driving route was found to this bin.',
+        );
+      }
+
+      final route = data['routes'][0];
+
+      final coordinates =
+          route['geometry']['coordinates'] as List;
+
+      final points = coordinates.map<LatLng>((coordinate) {
+        return LatLng(
+          (coordinate[1] as num).toDouble(),
+          (coordinate[0] as num).toDouble(),
+        );
+      }).toList();
+
+      if (!mounted) return;
+
+      await _positionSubscription?.cancel();
+
+      setState(() {
+        _userLocation = origin;
+        _routePoints = points;
+
+        _routeDistance =
+            (route['distance'] as num).toDouble();
+
+        _routeDuration =
+            (route['duration'] as num).toDouble();
+
+        _isNavigating = true;
+      });
+
+      // Display the complete route.
+      if (points.length >= 2) {
+        _mapController.fitCamera(
+          CameraFit.bounds(
+            bounds: LatLngBounds.fromPoints(points),
+            padding: const EdgeInsets.all(55),
+          ),
+        );
+      }
+
+      // Start live GPS updates.
+      _startLocationTracking();
+
+    } catch (e) {
+      if (mounted) {
+        _showMessage(
+          e.toString().replaceFirst('Exception: ', ''),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoadingRoute = false;
+        });
+      }
+    }
+  }
+
+  // --------------------------------------------------
+  // LIVE GPS TRACKING
+  // --------------------------------------------------
+
+  void _startLocationTracking() {
+    _positionSubscription?.cancel();
+
+    _positionSubscription =
+        Geolocator.getPositionStream(
+      locationSettings: const LocationSettings(
+        accuracy: LocationAccuracy.high,
+        distanceFilter: 10,
+      ),
+    ).listen(
+      (position) {
+        if (!mounted) return;
+
+        setState(() {
+          _userLocation = LatLng(
+            position.latitude,
+            position.longitude,
+          );
+        });
+      },
+      onError: (error) {
+        if (mounted) {
+          _showMessage(
+            'GPS tracking error: $error',
+          );
+        }
+      },
+    );
+  }
+
+  // --------------------------------------------------
+  // STOP NAVIGATION
+  // --------------------------------------------------
+
+  Future<void> _stopNavigation() async {
+    await _positionSubscription?.cancel();
+    _positionSubscription = null;
+
+    if (!mounted) return;
+
+    setState(() {
+      _isNavigating = false;
+
+      _userLocation = null;
+      _routePoints = [];
+
+      _routeDistance = null;
+      _routeDuration = null;
+    });
+  }
+
+  void _showMessage(String message) {
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+      ),
+    );
+  }
+
+  // --------------------------------------------------
+  // CENTER MAP
+  // --------------------------------------------------
+
+  void _centerMap() {
+    if (_isNavigating && _userLocation != null) {
+      _mapController.move(_userLocation!, 17);
+      return;
+    }
+
+    final location = _firstValidLocation(
+      BinStore.instance.bins,
+    );
+
+    if (location != null) {
+      _mapController.move(location, 15);
+    } else {
+      _showMessage(
+        'No verified bin locations are available.',
+      );
+    }
+  }
+
+  // --------------------------------------------------
+  // BUILD SCREEN
+  // --------------------------------------------------
+
   @override
   Widget build(BuildContext context) {
     final bins = BinStore.instance.bins;
 
-    final criticalBins = bins.where(
-      (bin) => bin.fillLevel >= 81,
-    ).length;
+    final mappedBins = bins
+        .where((bin) => bin.hasLocation)
+        .toList();
+
+    final criticalBins =
+        bins.where((bin) => bin.fillLevel >= 81).length;
+
+    final firstLocation = _firstValidLocation(bins);
 
     return Scaffold(
       backgroundColor: const Color(0xFFF6F8F6),
@@ -145,11 +469,7 @@ class _MapScreenState extends State<MapScreen> {
 
         actions: [
           IconButton(
-            onPressed: () {
-              setState(() {
-                _selectedBin = null;
-              });
-            },
+            onPressed: _centerMap,
             icon: const Icon(Icons.my_location),
             tooltip: 'Center map',
           ),
@@ -160,18 +480,10 @@ class _MapScreenState extends State<MapScreen> {
           ? _buildLoadingState()
           : Column(
               children: [
-                // -----------------------------------------------------
-                // SUMMARY
-                // -----------------------------------------------------
-
+                // SUMMARY CARDS
                 Container(
                   width: double.infinity,
-                  padding: const EdgeInsets.fromLTRB(
-                    16,
-                    16,
-                    16,
-                    12,
-                  ),
+                  padding: const EdgeInsets.all(16),
                   color: Colors.white,
 
                   child: Row(
@@ -189,6 +501,17 @@ class _MapScreenState extends State<MapScreen> {
 
                       Expanded(
                         child: _summaryCard(
+                          icon: Icons.location_on_outlined,
+                          title: 'Located Bins',
+                          value: '${mappedBins.length}',
+                          color: Colors.blue,
+                        ),
+                      ),
+
+                      const SizedBox(width: 10),
+
+                      Expanded(
+                        child: _summaryCard(
                           icon: Icons.warning_amber_outlined,
                           title: 'High Fill',
                           value: '$criticalBins',
@@ -199,18 +522,24 @@ class _MapScreenState extends State<MapScreen> {
                   ),
                 ),
 
-                // -----------------------------------------------------
                 // MAP
-                // -----------------------------------------------------
+               SizedBox(
+  height: _selectedBin != null || _isNavigating
+      ? 240
+      : 310,
 
-                SizedBox(
-                  height: 310,
                   child: Stack(
                     children: [
                       FlutterMap(
+                        mapController: _mapController,
+
                         options: MapOptions(
-                          initialCenter: _campusCenter,
-                          initialZoom: 17.0,
+                          initialCenter:
+                              firstLocation ?? _fallbackCenter,
+
+                          initialZoom:
+                              firstLocation == null ? 4 : 15,
+
                           interactionOptions:
                               const InteractionOptions(
                             flags: InteractiveFlag.all,
@@ -218,181 +547,328 @@ class _MapScreenState extends State<MapScreen> {
                         ),
 
                         children: [
+                          // MAP TILES
                           TileLayer(
                             urlTemplate:
                                 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+
                             userAgentPackageName:
                                 'com.garbageguardian.app',
                           ),
 
-                          MarkerLayer(
-                            markers: bins
-                                .map(
-                                  (bin) {
-                                    final location =
-                                        _getLocation(bin);
-
-                                    if (location == null) {
-                                      return null;
-                                    }
-
-                                    return Marker(
-                                      point: location,
-                                      width: 58,
-                                      height: 70,
-
-                                      child: GestureDetector(
-                                        onTap: () =>
-                                            _selectBin(bin),
-
-                                        child: _buildMarker(bin),
-                                      ),
-                                    );
-                                  },
-                                )
-                                .whereType<Marker>()
-                                .toList(),
-                          ),
-                        ],
-                      ),
-
-                      // DEMO LABEL
-                      Positioned(
-                        top: 10,
-                        left: 10,
-
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 10,
-                            vertical: 6,
-                          ),
-
-                          decoration: BoxDecoration(
-                            color: Colors.white.withValues(
-                              alpha: 0.92,
+                          // ROUTE POLYLINE
+                          if (_routePoints.length >= 2)
+                            PolylineLayer(
+                              polylines: [
+                                Polyline(
+                                  points: _routePoints,
+                                  strokeWidth: 6,
+                                  color: Colors.blue,
+                                  borderStrokeWidth: 2,
+                                  borderColor: Colors.white,
+                                ),
+                              ],
                             ),
 
-                            borderRadius:
-                                BorderRadius.circular(20),
+                          // BIN MARKERS
+                          MarkerLayer(
+                            markers: mappedBins.map((bin) {
+                              final location =
+                                  _getLocation(bin)!;
+
+                              return Marker(
+                                point: location,
+                                width: 58,
+                                height: 70,
+
+                                child: GestureDetector(
+                                  onTap: () => _selectBin(bin),
+                                  child: _buildMarker(bin),
+                                ),
+                              );
+                            }).toList(),
                           ),
 
-                          child: const Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(
-                                Icons.info_outline,
-                                size: 14,
-                                color: Colors.grey,
-                              ),
+                          // USER LOCATION MARKER
+                          if (_userLocation != null)
+                            MarkerLayer(
+                              markers: [
+                                Marker(
+                                  point: _userLocation!,
+                                  width: 46,
+                                  height: 46,
 
-                              SizedBox(width: 5),
+                                  child: Container(
+                                    decoration: BoxDecoration(
+                                      color: Colors.blue,
+                                      shape: BoxShape.circle,
+                                      border: Border.all(
+                                        color: Colors.white,
+                                        width: 4,
+                                      ),
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: Colors.black
+                                              .withValues(alpha: 0.2),
+                                          blurRadius: 8,
+                                        ),
+                                      ],
+                                    ),
 
-                              Text(
-                                'Demo bin locations',
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  color: Colors.grey,
-                                  fontWeight: FontWeight.w600,
+                                    child: const Icon(
+                                      Icons.navigation,
+                                      color: Colors.white,
+                                      size: 22,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+
+                          // OPENSTREETMAP ATTRIBUTION
+                          RichAttributionWidget(
+                            attributions: [
+                              TextSourceAttribution(
+                                'OpenStreetMap contributors',
+                                onTap: () => launchUrl(
+                                  Uri.parse(
+                                    'https://www.openstreetmap.org/copyright',
+                                  ),
                                 ),
                               ),
                             ],
                           ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-
-                // -----------------------------------------------------
-                // LIVE INFORMATION
-                // -----------------------------------------------------
-
-                Container(
-                  width: double.infinity,
-                  margin: const EdgeInsets.fromLTRB(
-                    16,
-                    12,
-                    16,
-                    8,
-                  ),
-
-                  padding: const EdgeInsets.all(13),
-
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFE8F5E9),
-                    borderRadius: BorderRadius.circular(14),
-                  ),
-
-                  child: const Row(
-                    crossAxisAlignment:
-                        CrossAxisAlignment.start,
-
-                    children: [
-                      Icon(
-                        Icons.sensors_outlined,
-                        color: Color(0xFF2E7D32),
+                        ],
                       ),
 
-                      SizedBox(width: 10),
+                      // MAP STATUS
+                      Positioned(
+                        top: 10,
+                        left: 10,
+                        right: 10,
 
-                      Expanded(
-                        child: Text(
-                          'Bin status and fill levels are updated '
-                          'from the live monitoring system. Map '
-                          'positions are demo locations for the prototype.',
-                          style: TextStyle(
-                            color: Color(0xFF285D2B),
-                            fontSize: 12,
+                        child: Container(
+                          padding: const EdgeInsets.all(10),
+
+                          decoration: BoxDecoration(
+                            color: Colors.white
+                                .withValues(alpha: 0.95),
+                            borderRadius:
+                                BorderRadius.circular(12),
+                          ),
+
+                          child: Text(
+                            _isNavigating
+                                ? 'Navigation active • ${_selectedBin?.id ?? ''}'
+                                : mappedBins.isEmpty
+                                    ? 'Real bin locations are unavailable.'
+                                    : 'Showing ${mappedBins.length} bins with GPS coordinates.',
+
+                            style: const TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                            ),
                           ),
                         ),
                       ),
+
+                      // ROUTE LOADING
+                      if (_isLoadingRoute)
+                        Container(
+                          color: Colors.black26,
+
+                          child: const Center(
+                            child: Card(
+                              child: Padding(
+                                padding: EdgeInsets.all(20),
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    CircularProgressIndicator(),
+                                    SizedBox(height: 12),
+                                    Text(
+                                      'Calculating route...',
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
                     ],
                   ),
                 ),
 
-                // -----------------------------------------------------
-                // BIN LIST
-                // -----------------------------------------------------
-
-                Expanded(
-                  child: ListView.builder(
-                    padding: const EdgeInsets.fromLTRB(
-                      16,
-                      6,
-                      16,
-                      24,
+                // NAVIGATION INFORMATION
+                if (_isNavigating)
+                  _buildNavigationPanel(),
+                // SENSOR INFORMATION
+                if (!_isNavigating && _selectedBin == null)
+                  Container(
+                    width: double.infinity,
+                    margin: const EdgeInsets.fromLTRB(
+                      16, 12, 16, 8,
                     ),
-
-                    itemCount: bins.length,
-
-                    itemBuilder: (context, index) {
-                      final bin = bins[index];
-
-                      return _buildBinCard(bin);
-                    },
+                    padding: const EdgeInsets.all(13),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFE8F5E9),
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Icon(
+                          Icons.sensors_outlined,
+                          color: Color(0xFF2E7D32),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            mappedBins.isEmpty
+                                ? 'Live bin readings are available, but GPS coordinates are needed to show locations.'
+                                : 'Bin fill levels update from the monitoring system. Select a bin to view details or navigate.',
+                            style: const TextStyle(
+                              color: Color(0xFF285D2B),
+                              fontSize: 12,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
-                ),
 
-                // -----------------------------------------------------
-                // SELECTED BIN
-                // -----------------------------------------------------
-
-                if (_selectedBin != null)
-                  _buildSelectedBinCard(
-                    _selectedBin!,
+                // BIN LIST - HIDE WHEN A BIN IS SELECTED
+                if (!_isNavigating && _selectedBin == null)
+                  Expanded(
+                    child: ListView.builder(
+                      padding: const EdgeInsets.fromLTRB(
+                        16, 6, 16, 24,
+                      ),
+                      itemCount: bins.length,
+                      itemBuilder: (context, index) {
+                        return _buildBinCard(bins[index]);
+                      },
+                    ),
                   ),
-              ],
-            ),
+
+                // SELECTED BIN DETAILS
+                if (!_isNavigating && _selectedBin != null)
+                  _buildSelectedBinCard(_selectedBin!),
+
+            ]),
     );
   }
 
-  // -------------------------------------------------------------------
-  // MARKER
-  // -------------------------------------------------------------------
+  // --------------------------------------------------
+  // NAVIGATION PANEL
+  // --------------------------------------------------
+
+  Widget _buildNavigationPanel() {
+    final distance = _routeDistance ?? 0;
+    final duration = _routeDuration ?? 0;
+
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.fromLTRB(16, 10, 16, 6),
+      padding: const EdgeInsets.all(16),
+
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.08),
+            blurRadius: 8,
+          ),
+        ],
+      ),
+
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+
+        children: [
+          Row(
+            children: [
+              const Icon(
+                Icons.navigation,
+                color: Colors.blue,
+              ),
+
+              const SizedBox(width: 8),
+
+              const Expanded(
+                child: Text(
+                  'Navigation Active',
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 16,
+                  ),
+                ),
+              ),
+
+              IconButton(
+                onPressed: _stopNavigation,
+                icon: const Icon(Icons.close),
+                tooltip: 'Stop navigation',
+              ),
+            ],
+          ),
+
+          const SizedBox(height: 12),
+
+          Row(
+            children: [
+              Expanded(
+                child: _selectedInfo(
+                  'Distance',
+                  '${(distance / 1000).toStringAsFixed(2)} km',
+                  Colors.blue,
+                ),
+              ),
+
+              Expanded(
+                child: _selectedInfo(
+                  'Estimated time',
+                  '${(duration / 60).ceil()} min',
+                  Colors.blue,
+                ),
+              ),
+            ],
+          ),
+
+          const SizedBox(height: 12),
+
+          Text(
+            'Destination: ${_selectedBin?.location ?? ''}',
+            style: const TextStyle(
+              color: Colors.grey,
+              fontSize: 12,
+            ),
+          ),
+
+          const SizedBox(height: 10),
+
+          SizedBox(
+            width: double.infinity,
+
+            child: OutlinedButton.icon(
+              onPressed: _centerMap,
+              icon: const Icon(Icons.my_location),
+              label: const Text('Center on my location'),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // --------------------------------------------------
+  // BIN MARKER
+  // --------------------------------------------------
 
   Widget _buildMarker(Bin bin) {
     final fill = bin.fillLevel.round().clamp(0, 100);
-
     final color = _getStatusColor(fill);
 
     return Column(
@@ -412,9 +888,7 @@ class _MapScreenState extends State<MapScreen> {
 
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withValues(
-                  alpha: 0.25,
-                ),
+                color: Colors.black.withValues(alpha: 0.25),
                 blurRadius: 6,
               ),
             ],
@@ -435,18 +909,7 @@ class _MapScreenState extends State<MapScreen> {
 
           decoration: BoxDecoration(
             color: Colors.white,
-
-            borderRadius:
-                BorderRadius.circular(5),
-
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(
-                  alpha: 0.15,
-                ),
-                blurRadius: 3,
-              ),
-            ],
+            borderRadius: BorderRadius.circular(5),
           ),
 
           child: Text(
@@ -462,9 +925,9 @@ class _MapScreenState extends State<MapScreen> {
     );
   }
 
-  // -------------------------------------------------------------------
-  // LOADING
-  // -------------------------------------------------------------------
+  // --------------------------------------------------
+  // LOADING STATE
+  // --------------------------------------------------
 
   Widget _buildLoadingState() {
     return const Center(
@@ -472,8 +935,7 @@ class _MapScreenState extends State<MapScreen> {
         padding: EdgeInsets.all(30),
 
         child: Column(
-          mainAxisAlignment:
-              MainAxisAlignment.center,
+          mainAxisAlignment: MainAxisAlignment.center,
 
           children: [
             Icon(
@@ -501,7 +963,7 @@ class _MapScreenState extends State<MapScreen> {
             SizedBox(height: 6),
 
             Text(
-              'Live bins will appear here when data is received.',
+              'Live bins will appear when data is received.',
               textAlign: TextAlign.center,
               style: TextStyle(
                 color: Colors.grey,
@@ -514,9 +976,9 @@ class _MapScreenState extends State<MapScreen> {
     );
   }
 
-  // -------------------------------------------------------------------
+  // --------------------------------------------------
   // SUMMARY CARD
-  // -------------------------------------------------------------------
+  // --------------------------------------------------
 
   Widget _summaryCard({
     required IconData icon,
@@ -525,58 +987,37 @@ class _MapScreenState extends State<MapScreen> {
     required Color color,
   }) {
     return Container(
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.all(10),
 
       decoration: BoxDecoration(
         color: color.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(14),
       ),
 
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+
         children: [
-          Container(
-            width: 42,
-            height: 42,
+          Icon(icon, color: color, size: 24),
 
-            decoration: BoxDecoration(
-              color: color.withValues(alpha: 0.12),
-              borderRadius:
-                  BorderRadius.circular(12),
-            ),
+          const SizedBox(height: 6),
 
-            child: Icon(
-              icon,
+          Text(
+            value,
+            style: TextStyle(
               color: color,
+              fontSize: 20,
+              fontWeight: FontWeight.bold,
             ),
           ),
 
-          const SizedBox(width: 10),
-
-          Expanded(
-            child: Column(
-              crossAxisAlignment:
-                  CrossAxisAlignment.start,
-
-              children: [
-                Text(
-                  title,
-                  style: const TextStyle(
-                    color: Colors.grey,
-                    fontSize: 12,
-                  ),
-                ),
-
-                const SizedBox(height: 2),
-
-                Text(
-                  value,
-                  style: TextStyle(
-                    color: color,
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ],
+          Text(
+            title,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              color: Colors.grey,
+              fontSize: 11,
             ),
           ),
         ],
@@ -584,36 +1025,27 @@ class _MapScreenState extends State<MapScreen> {
     );
   }
 
-  // -------------------------------------------------------------------
+  // --------------------------------------------------
   // BIN CARD
-  // -------------------------------------------------------------------
+  // --------------------------------------------------
 
   Widget _buildBinCard(Bin bin) {
     final fill = bin.fillLevel.round().clamp(0, 100);
-
     final statusColor = _getStatusColor(fill);
 
-    final isSelected =
-        _selectedBin?.id == bin.id;
+    final isSelected = _selectedBin?.id == bin.id;
 
     return InkWell(
       onTap: () => _selectBin(bin),
-
-      borderRadius:
-          BorderRadius.circular(18),
+      borderRadius: BorderRadius.circular(18),
 
       child: Container(
-        margin: const EdgeInsets.only(
-          bottom: 12,
-        ),
-
+        margin: const EdgeInsets.only(bottom: 12),
         padding: const EdgeInsets.all(16),
 
         decoration: BoxDecoration(
           color: Colors.white,
-
-          borderRadius:
-              BorderRadius.circular(18),
+          borderRadius: BorderRadius.circular(18),
 
           border: isSelected
               ? Border.all(
@@ -624,9 +1056,7 @@ class _MapScreenState extends State<MapScreen> {
 
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withValues(
-                alpha: 0.04,
-              ),
+              color: Colors.black.withValues(alpha: 0.04),
               blurRadius: 8,
               offset: const Offset(0, 3),
             ),
@@ -642,11 +1072,8 @@ class _MapScreenState extends State<MapScreen> {
                   height: 50,
 
                   decoration: BoxDecoration(
-                    color: statusColor.withValues(
-                      alpha: 0.1,
-                    ),
-                    borderRadius:
-                        BorderRadius.circular(14),
+                    color: statusColor.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(14),
                   ),
 
                   child: Icon(
@@ -679,8 +1106,7 @@ class _MapScreenState extends State<MapScreen> {
                         style: TextStyle(
                           color: statusColor,
                           fontSize: 12,
-                          fontWeight:
-                              FontWeight.w600,
+                          fontWeight: FontWeight.w600,
                         ),
                       ),
                     ],
@@ -688,7 +1114,7 @@ class _MapScreenState extends State<MapScreen> {
                 ),
 
                 Text(
-                  '$fill%',
+                  bin.hasSensorData ? '$fill%' : '--',
                   style: TextStyle(
                     color: statusColor,
                     fontSize: 20,
@@ -701,61 +1127,53 @@ class _MapScreenState extends State<MapScreen> {
             const SizedBox(height: 13),
 
             ClipRRect(
-              borderRadius:
-                  BorderRadius.circular(10),
+              borderRadius: BorderRadius.circular(10),
 
               child: LinearProgressIndicator(
-                value: fill / 100,
+                value: bin.hasSensorData ? fill / 100 : 0,
                 minHeight: 8,
-
-                backgroundColor:
-                    Colors.grey.shade200,
-
+                backgroundColor: Colors.grey.shade200,
                 valueColor:
-                    AlwaysStoppedAnimation<Color>(
-                  statusColor,
-                ),
+                    AlwaysStoppedAnimation<Color>(statusColor),
               ),
             ),
 
             const SizedBox(height: 10),
 
             Row(
-              mainAxisAlignment:
-                  MainAxisAlignment.spaceBetween,
-
               children: [
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(
-                    horizontal: 9,
-                    vertical: 5,
-                  ),
-
-                  decoration: BoxDecoration(
-                    color:
-                        statusColor.withValues(
-                      alpha: 0.1,
-                    ),
-                    borderRadius:
-                        BorderRadius.circular(20),
-                  ),
-
+                Expanded(
                   child: Text(
-                    bin.status,
-                    style: TextStyle(
-                      color: statusColor,
+                    bin.location,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: Colors.grey,
                       fontSize: 11,
-                      fontWeight:
-                          FontWeight.w600,
                     ),
                   ),
                 ),
 
-                const Text(
-                  'Demo location',
+                const SizedBox(width: 8),
+
+                Icon(
+                  bin.hasLocation
+                      ? Icons.location_on
+                      : Icons.location_off_outlined,
+                  size: 16,
+                  color: bin.hasLocation
+                      ? const Color(0xFF2E7D32)
+                      : Colors.grey,
+                ),
+
+                const SizedBox(width: 4),
+
+                Text(
+                  bin.hasLocation ? 'Located' : 'No GPS',
                   style: TextStyle(
-                    color: Colors.grey,
+                    color: bin.hasLocation
+                        ? const Color(0xFF2E7D32)
+                        : Colors.grey,
                     fontSize: 11,
                   ),
                 ),
@@ -767,199 +1185,182 @@ class _MapScreenState extends State<MapScreen> {
     );
   }
 
-  // -------------------------------------------------------------------
-  // SELECTED BIN
-  // -------------------------------------------------------------------
+  // --------------------------------------------------
+  // SELECTED BIN PANEL
+  // --------------------------------------------------
 
   Widget _buildSelectedBinCard(Bin bin) {
     final fill = bin.fillLevel.round().clamp(0, 100);
-
     final statusColor = _getStatusColor(fill);
 
-    return Container(
-      width: double.infinity,
+    return SafeArea(
+      top: false,
 
-      padding: const EdgeInsets.fromLTRB(
-        18,
-        14,
-        18,
-        18,
-      ),
+      child: Container(
+        width: double.infinity,
 
-      decoration: BoxDecoration(
-        color: Colors.white,
-
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(
-              alpha: 0.12,
-            ),
-            blurRadius: 15,
-            offset: const Offset(0, -4),
-          ),
-        ],
-
-        borderRadius:
-            const BorderRadius.vertical(
-          top: Radius.circular(22),
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.of(context).size.height * 0.42,
         ),
-      ),
 
-      child: Column(
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment:
-                      CrossAxisAlignment.start,
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
 
-                  children: [
-                    const Text(
-                      'Selected Smart Bin',
-                      style: TextStyle(
-                        color: Colors.grey,
-                        fontSize: 12,
-                      ),
-                    ),
+        decoration: BoxDecoration(
+          color: Colors.white,
 
-                    const SizedBox(height: 3),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.12),
+              blurRadius: 15,
+              offset: const Offset(0, -4),
+            ),
+          ],
 
-                    Text(
-                      bin.id,
-                      style: const TextStyle(
-                        fontSize: 19,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-
-              IconButton(
-                onPressed: () {
-                  setState(() {
-                    _selectedBin = null;
-                  });
-                },
-                icon: const Icon(Icons.close),
-              ),
-            ],
+          borderRadius: const BorderRadius.vertical(
+            top: Radius.circular(22),
           ),
+        ),
 
-          Row(
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+
             children: [
-              Expanded(
-                child: _selectedInfo(
-                  'Fill Level',
-                  '$fill%',
-                  statusColor,
-                ),
-              ),
+              Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment:
+                          CrossAxisAlignment.start,
 
-              Expanded(
-                child: _selectedInfo(
-                  'Status',
-                  bin.status,
-                  statusColor,
-                ),
-              ),
-            ],
-          ),
+                      children: [
+                        const Text(
+                          'Selected Smart Bin',
+                          style: TextStyle(
+                            color: Colors.grey,
+                            fontSize: 12,
+                          ),
+                        ),
 
-          const SizedBox(height: 14),
+                        const SizedBox(height: 3),
 
-          // -----------------------------------------------------------
-          // ACTION BUTTONS
-          // -----------------------------------------------------------
-
-          Row(
-            children: [
-              // VIEW DETAILS
-              Expanded(
-                child: SizedBox(
-                  height: 48,
-
-                  child: ElevatedButton.icon(
-                    onPressed: () =>
-                        _openDetails(bin),
-
-                    icon: const Icon(
-                      Icons.visibility_outlined,
-                      size: 20,
-                    ),
-
-                    label: const Text(
-                      'Details',
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-
-                    style:
-                        ElevatedButton.styleFrom(
-                      backgroundColor:
-                          const Color(0xFF2E7D32),
-                      foregroundColor:
-                          Colors.white,
-
-                      shape:
-                          RoundedRectangleBorder(
-                        borderRadius:
-                            BorderRadius.circular(13),
-                      ),
+                        Text(
+                          bin.id,
+                          style: const TextStyle(
+                            fontSize: 19,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ],
                     ),
                   ),
-                ),
+
+                  IconButton(
+                    visualDensity: VisualDensity.compact,
+
+                    onPressed: () {
+                      setState(() {
+                        _selectedBin = null;
+                      });
+                    },
+
+                    icon: const Icon(Icons.close),
+                  ),
+                ],
               ),
 
-              const SizedBox(width: 10),
-
-              // REPORT ISSUE
-              Expanded(
-                child: SizedBox(
-                  height: 48,
-
-                  child: OutlinedButton.icon(
-                    onPressed: () =>
-                        _reportIssue(bin),
-
-                    icon: const Icon(
-                      Icons.report_problem_outlined,
-                      size: 20,
+              Row(
+                children: [
+                  Expanded(
+                    child: _selectedInfo(
+                      'Fill Level',
+                      bin.hasSensorData ? '$fill%' : '--',
+                      statusColor,
                     ),
+                  ),
 
-                    label: const Text(
-                      'Report',
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                      ),
+                  Expanded(
+                    child: _selectedInfo(
+                      'Status',
+                      _getStatusText(bin),
+                      statusColor,
                     ),
+                  ),
+                ],
+              ),
 
-                    style:
-                        OutlinedButton.styleFrom(
+              const SizedBox(height: 12),
+
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+
+                children: [
+                  ElevatedButton.icon(
+                    onPressed: () => _openDetails(bin),
+                    icon: const Icon(Icons.visibility_outlined),
+                    label: const Text('Details'),
+
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF2E7D32),
+                      foregroundColor: Colors.white,
+                    ),
+                  ),
+
+                  OutlinedButton.icon(
+                    onPressed: () => _reportIssue(bin),
+                    icon: const Icon(Icons.report_problem_outlined),
+                    label: const Text('Report'),
+
+                    style: OutlinedButton.styleFrom(
                       foregroundColor: Colors.red,
-
-                      side: const BorderSide(
-                        color: Colors.red,
-                        width: 1.5,
-                      ),
-
-                      shape:
-                          RoundedRectangleBorder(
-                        borderRadius:
-                            BorderRadius.circular(13),
-                      ),
+                      side: const BorderSide(color: Colors.red),
                     ),
                   ),
-                ),
+
+                  FilledButton.icon(
+                    onPressed: bin.hasLocation && !_isLoadingRoute
+                        ? () => _navigateToBin(bin)
+                        : null,
+
+                    icon: const Icon(Icons.navigation_outlined),
+
+                    label: Text(
+                      _isLoadingRoute
+                          ? 'Calculating...'
+                          : 'Navigate',
+                    ),
+
+                    style: FilledButton.styleFrom(
+                      backgroundColor: const Color(0xFF1565C0),
+                      foregroundColor: Colors.white,
+                    ),
+                  ),
+                ],
               ),
+
+              if (!bin.hasLocation) ...[
+                const SizedBox(height: 8),
+
+                const Text(
+                  'Navigation requires verified GPS coordinates.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: Colors.grey,
+                    fontSize: 12,
+                  ),
+                ),
+              ],
             ],
           ),
-        ],
+        ),
       ),
     );
   }
+
+  // --------------------------------------------------
+  // SELECTED INFORMATION
+  // --------------------------------------------------
 
   Widget _selectedInfo(
     String title,
@@ -967,8 +1368,7 @@ class _MapScreenState extends State<MapScreen> {
     Color valueColor,
   ) {
     return Column(
-      crossAxisAlignment:
-          CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.start,
 
       children: [
         Text(

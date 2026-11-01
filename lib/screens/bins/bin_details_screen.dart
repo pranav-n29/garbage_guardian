@@ -1,4 +1,6 @@
+
 import 'package:flutter/material.dart';
+
 import '../../models/bin.dart';
 import '../../services/bin_store.dart';
 
@@ -15,7 +17,6 @@ class _BinDetailsScreenState extends State<BinDetailsScreen> {
   @override
   void initState() {
     super.initState();
-
     BinStore.instance.addListener(_onBinUpdated);
   }
 
@@ -43,21 +44,29 @@ class _BinDetailsScreenState extends State<BinDetailsScreen> {
       final id = arguments['binId']?.toString();
 
       if (id != null && id.isNotEmpty) {
-        initialBin = BinStore.instance.bins.cast<Bin?>().firstWhere(
-          (bin) => bin?.id == id,
-          orElse: () => null,
-        );
+        for (final item in BinStore.instance.bins) {
+          if (item.id == id) {
+            initialBin = item;
+            break;
+          }
+        }
       }
     }
 
     _binId ??= initialBin?.id;
 
-    final Bin? bin = _binId != null
-        ? BinStore.instance.bins.cast<Bin?>().firstWhere(
-            (item) => item?.id == _binId,
-            orElse: () => null,
-          )
-        : initialBin;
+    Bin? bin;
+
+    if (_binId != null) {
+      for (final item in BinStore.instance.bins) {
+        if (item.id == _binId) {
+          bin = item;
+          break;
+        }
+      }
+    }
+
+    bin ??= initialBin;
 
     if (bin == null) {
       return Scaffold(
@@ -78,8 +87,11 @@ class _BinDetailsScreenState extends State<BinDetailsScreen> {
       );
     }
 
-    final int fill = bin.fillLevel.round().clamp(0, 100);
-    final Color statusColor = _getStatusColor(fill);
+    final fill = bin.hasSensorData
+        ? bin.fillLevel.round().clamp(0, 100)
+        : 0;
+
+    final statusColor = _getStatusColor(fill);
 
     return Scaffold(
       backgroundColor: const Color(0xFFF6F8F6),
@@ -89,9 +101,7 @@ class _BinDetailsScreenState extends State<BinDetailsScreen> {
         elevation: 0,
         title: const Text(
           'Bin Details',
-          style: TextStyle(
-            fontWeight: FontWeight.bold,
-          ),
+          style: TextStyle(fontWeight: FontWeight.bold),
         ),
       ),
       body: SingleChildScrollView(
@@ -163,7 +173,7 @@ class _BinDetailsScreenState extends State<BinDetailsScreen> {
                   ),
                   const SizedBox(height: 25),
                   Text(
-                    '$fill%',
+                    bin.displayFillLevel,
                     style: TextStyle(
                       fontSize: 46,
                       fontWeight: FontWeight.bold,
@@ -181,7 +191,7 @@ class _BinDetailsScreenState extends State<BinDetailsScreen> {
                   ClipRRect(
                     borderRadius: BorderRadius.circular(10),
                     child: LinearProgressIndicator(
-                      value: fill / 100,
+                      value: bin.hasSensorData ? fill / 100 : 0,
                       minHeight: 12,
                       backgroundColor: Colors.grey.shade200,
                       valueColor:
@@ -199,67 +209,12 @@ class _BinDetailsScreenState extends State<BinDetailsScreen> {
                       borderRadius: BorderRadius.circular(30),
                     ),
                     child: Text(
-                      bin.status,
+                      bin.displayStatus,
                       style: TextStyle(
                         color: statusColor,
                         fontWeight: FontWeight.bold,
                       ),
                     ),
-                  ),
-                ],
-              ),
-            ),
-
-            const SizedBox(height: 20),
-
-            // LIVE STATUS
-            const Text(
-              'Live Status',
-              style: TextStyle(
-                fontSize: 19,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-
-            const SizedBox(height: 12),
-
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(18),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(18),
-              ),
-              child: Column(
-                children: [
-                  _infoRow(
-                    icon: Icons.wifi,
-                    title: 'Connection',
-                    value: bin.online
-                        ? 'Online'
-                        : 'Status unavailable',
-                    valueColor: bin.online
-                        ? const Color(0xFF2E7D32)
-                        : Colors.orange,
-                  ),
-                  const Divider(height: 24),
-                  _infoRow(
-                    icon: Icons.sensors_outlined,
-                    title: 'Sensor Distance',
-                    value:
-                        '${bin.distance.toStringAsFixed(0)} cm',
-                  ),
-                  const Divider(height: 24),
-                  _infoRow(
-                    icon: Icons.timer_outlined,
-                    title: 'Device Uptime',
-                    value: _formatUptime(bin.uptime),
-                  ),
-                  const Divider(height: 24),
-                  _infoRow(
-                    icon: Icons.access_time,
-                    title: 'Last Updated',
-                    value: _formatLastUpdated(bin.lastUpdated),
                   ),
                 ],
               ),
@@ -304,15 +259,21 @@ class _BinDetailsScreenState extends State<BinDetailsScreen> {
                   _infoRow(
                     icon: Icons.delete_outline,
                     title: 'Fill Level',
-                    value: '$fill%',
+                    value: bin.displayFillLevel,
                     valueColor: statusColor,
                   ),
                   const Divider(height: 24),
                   _infoRow(
                     icon: Icons.info_outline,
                     title: 'Status',
-                    value: bin.status,
+                    value: bin.displayStatus,
                     valueColor: statusColor,
+                  ),
+                  const Divider(height: 24),
+                  _infoRow(
+                    icon: Icons.update,
+                    title: 'Last Updated',
+                    value: bin.displayLastUpdated,
                   ),
                 ],
               ),
@@ -320,25 +281,15 @@ class _BinDetailsScreenState extends State<BinDetailsScreen> {
 
             const SizedBox(height: 25),
 
-            // NAVIGATION
+            // IN-APP NAVIGATION
             SizedBox(
               width: double.infinity,
               height: 54,
               child: ElevatedButton.icon(
-                onPressed: _hasCoordinates(bin)
-                    ? () {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text(
-                              'Map navigation will be connected when bin coordinates are available.',
-                            ),
-                          ),
-                        );
-                      }
+                onPressed: bin.hasLocation
+                    ? () => _navigateToBin(bin!)
                     : null,
-                icon: const Icon(
-                  Icons.navigation_outlined,
-                ),
+                icon: const Icon(Icons.navigation_outlined),
                 label: const Text(
                   'Navigate to Bin',
                   style: TextStyle(
@@ -360,7 +311,7 @@ class _BinDetailsScreenState extends State<BinDetailsScreen> {
 
             const SizedBox(height: 12),
 
-            // REPORT
+            // REPORT ISSUE
             SizedBox(
               width: double.infinity,
               height: 54,
@@ -369,15 +320,13 @@ class _BinDetailsScreenState extends State<BinDetailsScreen> {
                   Navigator.pushNamed(
                     context,
                     '/report-issue',
-                    arguments: {
-                      'binId': bin.id,
-                      'location': bin.location,
-                    },
+                 arguments: {
+  'binId': bin!.id,
+  'location': bin!.location,
+},
                   );
                 },
-                icon: const Icon(
-                  Icons.report_problem_outlined,
-                ),
+                icon: const Icon(Icons.report_problem_outlined),
                 label: const Text(
                   'Report an Issue',
                   style: TextStyle(
@@ -387,9 +336,7 @@ class _BinDetailsScreenState extends State<BinDetailsScreen> {
                 ),
                 style: OutlinedButton.styleFrom(
                   foregroundColor: Colors.red,
-                  side: const BorderSide(
-                    color: Colors.red,
-                  ),
+                  side: const BorderSide(color: Colors.red),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(14),
                   ),
@@ -398,39 +345,27 @@ class _BinDetailsScreenState extends State<BinDetailsScreen> {
             ),
 
             const SizedBox(height: 25),
-
-            // INFORMATION NOTE
-            Container(
-              padding: const EdgeInsets.all(15),
-              decoration: BoxDecoration(
-                color: const Color(0xFFE8F5E9),
-                borderRadius: BorderRadius.circular(14),
-              ),
-              child: const Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Icon(
-                    Icons.cloud_done_outlined,
-                    color: Color(0xFF2E7D32),
-                  ),
-                  SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      'This bin data is received from the smart waste monitoring system.',
-                      style: TextStyle(
-                        color: Color(0xFF285D2B),
-                        fontSize: 13,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-
-            const SizedBox(height: 20),
           ],
         ),
       ),
+    );
+  }
+
+  // OPEN THE LOCAL FLUTTER MAP
+  void _navigateToBin(Bin bin) {
+    if (!bin.hasLocation) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Valid bin coordinates are unavailable.'),
+        ),
+      );
+      return;
+    }
+
+    Navigator.pushNamed(
+      context,
+      '/map',
+      arguments: bin,
     );
   }
 
@@ -444,50 +379,6 @@ class _BinDetailsScreenState extends State<BinDetailsScreen> {
     }
 
     return const Color(0xFF2E7D32);
-  }
-
-  static String _formatLastUpdated(DateTime dateTime) {
-    final difference = DateTime.now().toUtc().difference(
-          dateTime.toUtc(),
-        );
-
-    if (difference.isNegative) {
-      return 'Just now';
-    }
-
-    if (difference.inSeconds < 60) {
-      return '${difference.inSeconds}s ago';
-    }
-
-    if (difference.inMinutes < 60) {
-      return '${difference.inMinutes} min ago';
-    }
-
-    if (difference.inHours < 24) {
-      return '${difference.inHours} hr ago';
-    }
-
-    return '${difference.inDays} days ago';
-  }
-
-  static String _formatUptime(int seconds) {
-    final days = seconds ~/ 86400;
-    final hours = (seconds % 86400) ~/ 3600;
-    final minutes = (seconds % 3600) ~/ 60;
-
-    if (days > 0) {
-      return '${days}d ${hours}h ${minutes}m';
-    }
-
-    if (hours > 0) {
-      return '${hours}h ${minutes}m';
-    }
-
-    return '${minutes}m';
-  }
-
-  static bool _hasCoordinates(Bin bin) {
-    return bin.latitude != 0.0 && bin.longitude != 0.0;
   }
 
   static Widget _infoRow({

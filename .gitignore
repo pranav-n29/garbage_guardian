@@ -43,3 +43,19 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+
+# Android local configuration
+android/local.properties
+
+# Signing keys
+*.jks
+*.keystore
+
+# IDE temporary files
+.vscode/*.log

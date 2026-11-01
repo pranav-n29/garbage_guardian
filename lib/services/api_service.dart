@@ -7,10 +7,7 @@ class ApiService {
   ApiService._();
 
   static final ApiService instance = ApiService._();
-
-  static const String baseUrl =
-    'http://3.26.184.112/api';
-
+  static const String baseUrl = 'http://52.62.227.19/api';
   static const String _tokenKey = 'auth_token';
 
   String? _token;
@@ -199,23 +196,55 @@ class ApiService {
     return _handleResponse(response);
   }
 
+
+  // ---------------------------------------------------------------
+  // GET SAVED BIN LOCATIONS
+  // ---------------------------------------------------------------
+
+  Future<Map<String, dynamic>> getBinLocations() async {
+    final response = await http.get(
+      Uri.parse('$baseUrl/bin-locations'),
+      headers: {
+        'Accept': 'application/json',
+      },
+    );
+
+    return _handleResponse(response);
+  }
+
+
   // ---------------------------------------------------------------
   // RESPONSE HANDLER
   // ---------------------------------------------------------------
 
-  Map<String, dynamic> _handleResponse(
-    http.Response response,
-  ) {
-    final data = jsonDecode(response.body);
+ Map<String, dynamic> _handleResponse(http.Response response) {
+  final body = response.body.trim();
 
-    if (response.statusCode >= 200 &&
-        response.statusCode < 300) {
-      return Map<String, dynamic>.from(data);
-    }
+  dynamic decoded;
 
+  try {
+    decoded = jsonDecode(body);
+  } on FormatException {
     throw Exception(
-      data['message']?.toString() ??
-          'Request failed with status ${response.statusCode}',
+      'Server returned HTML or invalid JSON '
+      '(HTTP ${response.statusCode}). '
+      'Check the API URL and backend route.',
     );
   }
+
+  if (decoded is! Map) {
+    throw Exception('Unexpected response format from server.');
+  }
+
+  final data = Map<String, dynamic>.from(decoded);
+
+  if (response.statusCode >= 200 && response.statusCode < 300) {
+    return data;
+  }
+
+  throw Exception(
+    data['message']?.toString() ??
+        'Request failed with status ${response.statusCode}',
+  );
+}
 }

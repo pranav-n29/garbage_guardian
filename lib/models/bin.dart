@@ -1,3 +1,4 @@
+
 class Bin {
   final String id;
   final String location;
@@ -25,22 +26,90 @@ class Bin {
 
   factory Bin.fromJson(Map<String, dynamic> json) {
     return Bin(
-      distance: (json['distance'] as num?)?.toDouble() ?? 0.0,
-      id: json['deviceId']?.toString() ?? '',
-      location: json['location']?.toString() ?? 'Location unavailable',
-      fillLevel: (json['fillPercentage'] as num?)?.toDouble() ?? 0.0,
-      status: json['status']?.toString() ?? 'Unknown',
+      id: json['deviceId']?.toString() ??
+          json['id']?.toString() ??
+          '',
+      location: json['location']?.toString() ??
+          'Location unavailable',
 
-      // Backend has NOT provided coordinates yet.
-      latitude: (json['latitude'] as num?)?.toDouble() ?? 0.0,
-      longitude: (json['longitude'] as num?)?.toDouble() ?? 0.0,
+      fillLevel: _toDouble(
+        json['fillPercentage'] ?? json['fillLevel'],
+      ),
 
-      lastUpdated:
-          DateTime.tryParse(json['lastUpdated']?.toString() ?? '') ??
-              DateTime.now(),
+      status: json['status']?.toString() ?? 'UNKNOWN',
 
-      uptime: (json['uptime'] as num?)?.toInt() ?? 0,
+      latitude: _toDouble(json['latitude']),
+      longitude: _toDouble(json['longitude']),
+
+      lastUpdated: DateTime.tryParse(
+            json['lastUpdated']?.toString() ?? '',
+          ) ??
+          DateTime.fromMillisecondsSinceEpoch(0),
+
+      uptime: _toInt(json['uptime']),
       online: json['online'] == true,
+      distance: _toDouble(json['distance']),
     );
+  }
+
+  static double _toDouble(dynamic value) {
+    if (value is num) return value.toDouble();
+    return double.tryParse(value?.toString() ?? '') ?? 0.0;
+  }
+
+  static int _toInt(dynamic value) {
+    if (value is num) return value.toInt();
+    return int.tryParse(value?.toString() ?? '') ?? 0;
+  }
+
+  // LOCATION
+
+  bool get hasLocation {
+    return latitude != 0 &&
+        longitude != 0 &&
+        latitude >= -90 &&
+        latitude <= 90 &&
+        longitude >= -180 &&
+        longitude <= 180;
+  }
+
+  // SENSOR DATA
+
+  bool get hasSensorData {
+    return lastUpdated.millisecondsSinceEpoch > 0 ||
+        status.toUpperCase() != 'UNKNOWN' ||
+        fillLevel > 0 ||
+        uptime > 0 ||
+        online;
+  }
+
+  bool get isFull => fillLevel >= 80;
+
+  bool get isNearlyFull => fillLevel >= 60;
+
+  bool get needsCollection {
+    return hasSensorData &&
+        (isFull || status.toUpperCase() == 'FULL');
+  }
+
+  String get displayFillLevel {
+    if (!hasSensorData) return '--';
+    return '${fillLevel.round()}%';
+  }
+
+  String get displayStatus {
+    if (!hasSensorData) return 'Awaiting Sensor Data';
+
+    if (needsCollection) return 'Needs Collection';
+
+    if (isNearlyFull) return 'Nearly Full';
+
+    return 'Normal';
+  }
+
+  String get displayLastUpdated {
+    if (!hasSensorData) return 'No sensor data received';
+
+    return 'Updated ${lastUpdated.toLocal()}';
   }
 }

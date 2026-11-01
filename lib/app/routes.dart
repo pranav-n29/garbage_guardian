@@ -56,9 +56,10 @@ class AppRoutes {
         );
 
       case map:
-        return MaterialPageRoute(
-          builder: (_) => const MapScreen(),
-        );
+  return MaterialPageRoute(
+    settings: settings, // IMPORTANT: Passes selected Bin
+    builder: (_) => const MapScreen(),
+  );
 
       case reportIssue:
         return MaterialPageRoute(

@@ -362,55 +362,8 @@ class _HomeScreenState extends State<HomeScreen> {
               if (allBins.isNotEmpty)
                 const SizedBox(height: 12),
 
-              // -------------------------------------------------------
-              // LIVE STATUS BANNER
-              // -------------------------------------------------------
 
-              if (allBins.isNotEmpty)
-                Container(
-                  width: double.infinity,
 
-                  padding:
-                      const EdgeInsets.all(14),
-
-                  decoration: BoxDecoration(
-                    color:
-                        const Color(0xFFE8F5E9),
-
-                    borderRadius:
-                        BorderRadius.circular(
-                      14,
-                    ),
-                  ),
-
-                  child: Row(
-                    children: [
-                      const Icon(
-                        Icons.sensors_outlined,
-                        color:
-                            Color(0xFF2E7D32),
-                      ),
-
-                      const SizedBox(width: 10),
-
-                      Expanded(
-                        child: Text(
-                          highFillCount > 0
-                              ? '$highFillCount smart bin${highFillCount == 1 ? '' : 's'} currently need attention.'
-                              : 'All monitored smart bins are currently at normal levels.',
-                          style:
-                              const TextStyle(
-                            color:
-                                Color(0xFF285D2B),
-                            fontSize: 12,
-                            fontWeight:
-                                FontWeight.w600,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
 
               const SizedBox(height: 25),
 

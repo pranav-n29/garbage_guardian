@@ -16,16 +16,30 @@ class _GarbageGuardianAppState
     extends State<GarbageGuardianApp> {
   final SocketService _socketService = SocketService();
 
-  @override
-  void initState() {
-    super.initState();
+@override
+void initState() {
+  super.initState();
 
-    _socketService.connect(
-     onSmartBinData: (data) {
-  BinStore.instance.updateFromSocket(data);
-},
-    );
-  }
+  _socketService.connect(
+    onConnected: () {
+      debugPrint('✅ Citizen app connected to backend');
+    },
+
+    onDisconnected: () {
+      debugPrint('⚠️ Citizen app disconnected');
+    },
+
+    onError: (error) {
+      debugPrint('❌ Citizen app socket error: $error');
+    },
+
+    onSmartBinData: (data) {
+      debugPrint('📦 Received sensor data: $data');
+
+      BinStore.instance.updateFromSocket(data);
+    },
+  );
+}
 
   @override
   void dispose() {
